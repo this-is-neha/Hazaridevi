@@ -5,7 +5,7 @@ import { API_BASE_URL } from './config';
 import { useInView } from './Reveal';
 import { LazyImage } from './LazyImage';
 import { ShoppingBag, Check, ShieldCheck, Plus, Minus, AlertCircle, ArrowRight } from 'lucide-react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 
 interface CategoryFilter {
   id: string;
@@ -251,6 +251,9 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ variant = 'page'
   const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [activeCategory, setActiveCategory] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<'default' | 'price-asc' | 'price-desc' | 'name-asc'>('default');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const searchQuery = (searchParams.get('q') || '').trim().toLowerCase();
   const [addedTracker, setAddedTracker] = useState<Record<string, boolean>>({});
   const [warningTracker, setWarningTracker] = useState<Record<string, string | null>>({});
   const [selectedQuantities, setSelectedQuantities] = useState<Record<string, number | string>>({});
@@ -291,12 +294,9 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ variant = 'page'
       const res = await fetch(`${getApiBaseUrl()}/api/products`);
       const data = await res.json();
 
-      if (data.success && Array.isArray(data.products) && data.products.length > 0) {
-        const backendIds = new Set(data.products.map((p: any) => String(p.id || p._id)));
-        const missingDefaults = INITIAL_DEFAULT_PRODUCTS.filter(def => !backendIds.has(String(def.id)));
-        const combined = [...data.products, ...missingDefaults];
-        const mapped = combined.map(mapRawToProductItem);
-
+      if (data.success && Array.isArray(data.products)) {
+        // The database is the source of truth: show exactly what is stored there.
+        const mapped = data.products.map(mapRawToProductItem);
         setProducts(mapped);
         localStorage.setItem('hz_live_products', JSON.stringify(mapped));
         return;
@@ -318,9 +318,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ variant = 'page'
       }
     }
 
-    const fallback = INITIAL_DEFAULT_PRODUCTS.map(mapRawToProductItem);
-    setProducts(fallback);
-    localStorage.setItem('hz_live_products', JSON.stringify(fallback));
+    setProducts([]);
   };
 
   useEffect(() => {
@@ -352,11 +350,34 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ variant = 'page'
     });
   }, [products]);
 
-  const categoryProducts = activeCategory === 'all'
-    ? products
-    : products.filter((p) => p.categoryId === activeCategory);
+  const matchesSearch = (p: ProductItem) =>
+    !searchQuery ||
+    [p.titleEn, p.titleNe, p.descriptionEn, p.categoryTagEn, p.categoryId].some((f) => (f || '').toLowerCase().includes(searchQuery));
+  const categoryProducts = products
+    .filter((p) => (activeCategory === 'all' || p.categoryId === activeCategory) && matchesSearch(p))
+    .sort((a, b) => {
+      if (sortBy === 'price-asc') return a.price - b.price;
+      if (sortBy === 'price-desc') return b.price - a.price;
+      if (sortBy === 'name-asc') return a.titleEn.localeCompare(b.titleEn);
+      return 0;
+    });
   const filteredProducts = limit ? categoryProducts.slice(0, limit) : categoryProducts;
   const skeletonCount = limit ?? 6;
+
+  // Sidebar categories: the known list plus any category that exists only in the database
+  const searchedProducts = products.filter(matchesSearch);
+  const categoryCounts: Record<string, number> = { all: searchedProducts.length };
+  searchedProducts.forEach((p) => {
+    categoryCounts[p.categoryId] = (categoryCounts[p.categoryId] || 0) + 1;
+  });
+  const knownIds = new Set(CATEGORIES.map((c) => c.id));
+  const extraCategories: CategoryFilter[] = Array.from(new Set(products.map((p) => p.categoryId)))
+    .filter((id) => id && !knownIds.has(id))
+    .map((id) => {
+      const label = id.charAt(0).toUpperCase() + id.slice(1).replace(/-/g, ' ');
+      return { id, nameEn: label, nameNe: label };
+    });
+  const sidebarCategories: CategoryFilter[] = [...CATEGORIES, ...extraCategories];
 
   const handleQtyStep = (productId: string, delta: number) => {
     setSelectedQuantities((prev) => {
@@ -477,10 +498,12 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ variant = 'page'
       </div>
       )}
 
-      {/* CATEGORY FILTER PILLS */}
+      <div className={isFeatured ? '' : 'lg:grid lg:grid-cols-[270px_minmax(0,1fr)] lg:gap-8 items-start'}>
+      {/* CATEGORY SIDEBAR (desktop) + PILLS (mobile) */}
       {!isFeatured && (
-      <div className="flex items-center gap-2.5 overflow-x-auto pb-4 pt-1 mb-10 scrollbar-none no-scrollbar">
-        {CATEGORIES.map((cat) => {
+      <>
+      <div className="lg:hidden flex items-center gap-2.5 overflow-x-auto pb-4 pt-1 mb-6 scrollbar-none no-scrollbar">
+        {sidebarCategories.map((cat) => {
           const isActive = activeCategory === cat.id;
           return (
             <button
@@ -497,10 +520,84 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ variant = 'page'
           );
         })}
       </div>
+
+      <aside className="hidden lg:block sticky top-28 bg-white border border-emerald-900/20 rounded-xs shadow-2xs text-left overflow-hidden">
+        <div className="bg-[#1a3a2a] text-amber-300 px-5 py-3.5 border-b-2 border-amber-500 text-xs font-mono font-bold uppercase tracking-widest">
+          {lang === 'ne' ? 'वर्गहरू' : 'Categories'}
+        </div>
+        <nav aria-label="Product categories" className="py-2 max-h-[70vh] overflow-y-auto">
+          {sidebarCategories.map((cat) => {
+            const isActive = activeCategory === cat.id;
+            const count = categoryCounts[cat.id] ?? 0;
+            return (
+              <button
+                key={cat.id}
+                type="button"
+                onClick={() => setActiveCategory(cat.id)}
+                aria-current={isActive ? 'true' : undefined}
+                className={`w-full flex items-center justify-between gap-3 px-5 py-3 text-left text-sm border-l-4 transition cursor-pointer ${
+                  isActive
+                    ? 'border-amber-500 bg-emerald-50 text-emerald-950 font-extrabold'
+                    : count === 0
+                    ? 'border-transparent text-zinc-400 hover:bg-zinc-50 font-medium'
+                    : 'border-transparent text-zinc-800 hover:bg-zinc-50 hover:text-emerald-950 font-semibold'
+                }`}
+              >
+                <span className="leading-snug">{lang === 'ne' ? cat.nameNe : cat.nameEn}</span>
+                <span className={`shrink-0 min-w-[26px] text-center text-xs font-mono font-bold px-1.5 py-0.5 rounded-full ${
+                  isActive ? 'bg-[#1a3a2a] text-amber-300' : 'bg-zinc-100 text-zinc-600'
+                }`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+      </aside>
+      </>
+      )}
+
+      <div className="min-w-0">
+      {/* SORT + SEARCH STATUS */}
+      {!isFeatured && (
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6 -mt-4 lg:mt-0">
+        <div className="text-sm text-zinc-700 font-medium">
+          {searchQuery ? (
+            <span className="inline-flex items-center gap-2">
+              {lang === 'ne' ? 'खोजी:' : 'Search:'} <strong>"{searchParams.get('q')}"</strong>
+              <button
+                type="button"
+                onClick={() => setSearchParams({})}
+                className="text-xs font-bold text-emerald-800 underline underline-offset-2 cursor-pointer"
+              >
+                {lang === 'ne' ? 'हटाउनुहोस्' : 'Clear'}
+              </button>
+            </span>
+          ) : null}
+          {!loading && (
+            <span className={searchQuery ? 'ml-3 text-zinc-500' : ''}>
+              {filteredProducts.length} {lang === 'ne' ? 'उत्पादन' : filteredProducts.length === 1 ? 'product' : 'products'}
+            </span>
+          )}
+        </div>
+        <label className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-zinc-700">
+          <span>{lang === 'ne' ? 'क्रमबद्ध:' : 'Sort by'}</span>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+            className="px-3 py-2 text-sm font-semibold normal-case tracking-normal text-zinc-900 bg-white border border-zinc-300 rounded-xs focus:border-emerald-700 focus:outline-none cursor-pointer"
+          >
+            <option value="default">{lang === 'ne' ? 'सुरुको क्रम' : 'Featured'}</option>
+            <option value="price-asc">{lang === 'ne' ? 'मूल्य: कम देखि बढी' : 'Price: Low to High'}</option>
+            <option value="price-desc">{lang === 'ne' ? 'मूल्य: बढी देखि कम' : 'Price: High to Low'}</option>
+            <option value="name-asc">{lang === 'ne' ? 'नाम: A–Z' : 'Name: A–Z'}</option>
+          </select>
+        </label>
+      </div>
       )}
 
       {/* PRODUCT GRID */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className={`grid grid-cols-1 md:grid-cols-2 gap-6 ${isFeatured ? 'lg:grid-cols-3' : 'xl:grid-cols-3'}`}>
         {loading && Array.from({ length: skeletonCount }, (_, i) => <ProductCardSkeleton key={`sk-${i}`} />)}
         {!loading && filteredProducts.map((product, index) => {
           const isJustAdded = addedTracker[product.id];
@@ -668,6 +765,9 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({ variant = 'page'
             </LazyProductCard>
           );
         })}
+      </div>
+
+      </div>
       </div>
 
       {/* FLOATING STICKY CHECKOUT BAR AT THE BOTTOM */}

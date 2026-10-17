@@ -1,3 +1,4 @@
+import { useAuth } from './AuthContext';
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
 export interface CartItem {
@@ -23,18 +24,45 @@ interface CartContextType {
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [cart, setCart] = useState<CartItem[]>(() => {
+  const { customer, loading } = useAuth();
+  // Each account has its own cart; logged-out visitors use a guest cart.
+  const storageKey = customer ? `hz_cart_${customer.id}` : 'hz_cart_guest';
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+
+  const readCart = (key: string): CartItem[] => {
     try {
-      const saved = localStorage.getItem('hz_cart');
+      const saved = localStorage.getItem(key);
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
     }
-  });
+  };
+
+  // Switch carts when the user logs in / out (wait until the session check finishes)
+  useEffect(() => {
+    if (loading) return;
+    let next = readCart(storageKey);
+    if (customer) {
+      // Items added as a guest move into the account's cart on login
+      const guest = readCart('hz_cart_guest');
+      if (guest.length > 0) {
+        for (const g of guest) {
+          const existing = next.find((i) => i.id === g.id);
+          if (existing) existing.quantity += g.quantity;
+          else next = [...next, g];
+        }
+        try { localStorage.removeItem('hz_cart_guest'); } catch { /* ignore */ }
+      }
+    }
+    setCart(next);
+    setLoadedKey(storageKey);
+  }, [storageKey, loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    localStorage.setItem('hz_cart', JSON.stringify(cart));
-  }, [cart]);
+    if (loadedKey !== storageKey) return;
+    try { localStorage.setItem(storageKey, JSON.stringify(cart)); } catch { /* ignore */ }
+  }, [cart, storageKey, loadedKey]);
 
   const addToCart = (product: Omit<CartItem, 'quantity'>, qty = 15) => {
     setCart((prev) => {

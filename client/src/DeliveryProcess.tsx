@@ -39,21 +39,26 @@ export const DeliveryProcess: React.FC = () => {
   ];
 
   return (
-    <section className="py-16 bg-white border-t border-zinc-200 font-sans">
-      <div className="max-w-site mx-auto px-4 space-y-10">
+    <section className="py-16 bg-zinc-50 border-t border-zinc-200 font-sans">
+      <div className="max-w-site mx-auto px-4 sm:px-6 space-y-10">
         
         {/* Main Heading & Clear Subtitle */}
-        <div className="max-w-3xl text-left space-y-3">
+        <div className="max-w-3xl mx-auto text-center space-y-3">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-[#1a3a2a] border border-emerald-800 text-amber-300 text-xs font-mono font-bold uppercase tracking-wider">
+            <Truck size={13} className="text-amber-400 shrink-0" />
+            <span>{lang === 'ne' ? 'सुरक्षित ढुवानी' : 'Safe Nationwide Delivery'}</span>
+          </div>
           <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-zinc-950 tracking-tight leading-tight">
             {lang === 'ne'
               ? 'नेपालभर हाँसका चल्ला र अण्डा सुरक्षित पुर्‍याउने तरिका'
               : 'How We Deliver Ducks & Eggs Safely Across Nepal'}
           </h2>
-          <p className="text-sm sm:text-base font-semibold text-zinc-700 leading-relaxed">
+          <p className="text-sm sm:text-base font-medium text-zinc-700 leading-relaxed">
             {lang === 'ne'
               ? 'साना चल्ला र अण्डालाई बाटोमा विशेष हेरचाह चाहिन्छ। हामी कसरी सुरक्षित प्याकिङ गरेर रात्री बसबाट तपाईंको सहरसम्म सकुशल पुर्‍याउँछौं, यहाँ हेर्नुहोस्:'
               : 'Small ducklings and eggs need gentle care on the road. Here is how we pack and deliver them safely to your city by night bus with a 100% safe arrival guarantee:'}
           </p>
+          <div className="w-12 h-1 bg-amber-500 mx-auto mt-2" />
         </div>
 
         {/* 3 Step Cards Grid */}
@@ -61,15 +66,15 @@ export const DeliveryProcess: React.FC = () => {
           {steps.map((item) => (
             <div
               key={item.step}
-              className="bg-zinc-50 rounded-3xl p-6 sm:p-7 border border-zinc-200 hover:border-zinc-400 hover:shadow-lg transition flex flex-col justify-between space-y-6 text-left"
+              className="bg-white rounded-xs p-6 sm:p-7 border-2 border-zinc-200 border-t-4 border-t-amber-500 hover:border-zinc-400 hover:border-t-amber-500 hover:shadow-xl transition flex flex-col justify-between space-y-6 text-left"
             >
               <div className="space-y-4">
                 {/* Step Chip and Icon */}
                 <div className="flex items-center justify-between">
-                  <span className="inline-block bg-emerald-100 text-emerald-900 text-xs font-black px-3 py-1 rounded-xl">
+                  <span className="inline-block bg-[#1a3a2a] text-amber-300 text-xs font-mono font-black px-3 py-1 rounded-xs">
                     {item.step}
                   </span>
-                  <div className="w-10 h-10 rounded-2xl bg-white border border-zinc-300 flex items-center justify-center shadow-xs">
+                  <div className="w-11 h-11 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center shadow-xs">
                     {item.icon}
                   </div>
                 </div>

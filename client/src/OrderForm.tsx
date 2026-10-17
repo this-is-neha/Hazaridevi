@@ -5,10 +5,10 @@ import { useLang } from './LanguageContext';
 import { useCart } from './CartContext';
 import { useAuth, apiRequest } from './AuthContext';
 import { NEPAL_ADMIN_DATA } from './nepalData';
-import { API_BASE_URL, WHATSAPP_URL } from './config';
+import { API_BASE_URL } from './config';
 import {
   ShoppingBag, Plus, Trash2, ShieldCheck, Truck,
-  CreditCard, X, CheckCircle2, Copy, Check, ExternalLink, Zap, Building2, Mail, Loader2, AlertCircle
+  CreditCard, CheckCircle2, Copy, Check, ExternalLink, Zap, Building2, Mail, Loader2, AlertCircle, MapPin
 } from 'lucide-react';
 
 export const OrderForm: React.FC = () => {
@@ -32,10 +32,20 @@ export const OrderForm: React.FC = () => {
   // Cart helper states
   const [selectedProductId, setSelectedProductId] = useState('');
   const [addQty, setAddQty] = useState(25);
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Payment Gateway Modal State
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  // Checkout steps: 1 = items, 2 = delivery details, 3 = payment (shown inline, not as a popup)
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [latitudeText, setLatitudeText] = useState('');
+  const [longitudeText, setLongitudeText] = useState('');
+  const parsedLat = latitudeText.trim() === '' ? NaN : Number(latitudeText);
+  const parsedLng = longitudeText.trim() === '' ? NaN : Number(longitudeText);
+  const coords =
+    Number.isFinite(parsedLat) && Number.isFinite(parsedLng) && Math.abs(parsedLat) <= 90 && Math.abs(parsedLng) <= 180
+      ? { latitude: parsedLat, longitude: parsedLng }
+      : null;
+  const [locStatus, setLocStatus] = useState<'idle' | 'asking' | 'done' | 'error'>('idle');
+  const [locMessage, setLocMessage] = useState('');
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'esewa' | 'khalti' | 'bank'>('esewa');
   const [transactionCode, setTransactionCode] = useState('');
   const [orderFinalized, setOrderFinalized] = useState(false);
@@ -123,11 +133,69 @@ export const OrderForm: React.FC = () => {
       return;
     }
 
-    setIsSubmitting(true);
-    setTimeout(() => {
-      setIsSubmitting(false);
-      setShowPaymentModal(true);
-    }, 200);
+    goToStep(3);
+  };
+
+  const goToStep = (next: 1 | 2 | 3) => {
+    setStep(next);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Asks the browser for permission, then stores the coordinates with the order
+  // and does a best-effort fill of the address fields from the reverse-geocoded place
+  const handleUseCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      setLocStatus('error');
+      setLocMessage(lang === 'ne' ? 'तपाईंको ब्राउजरले लोकेसन सपोर्ट गर्दैन।' : 'Your browser does not support location.');
+      return;
+    }
+    setLocStatus('asking');
+    setLocMessage('');
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords;
+        setLatitudeText(latitude.toFixed(6));
+        setLongitudeText(longitude.toFixed(6));
+        try {
+          const r = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=16&lat=${latitude}&lon=${longitude}`,
+            { headers: { 'Accept-Language': 'en' } }
+          );
+          const geo = await r.json();
+          const haystack = JSON.stringify(geo.address || {}).toLowerCase();
+          let matched = false;
+          for (const [pKey, prov] of Object.entries(NEPAL_ADMIN_DATA as any) as [string, any][]) {
+            for (const [dKey, dist] of Object.entries(prov.districts) as [string, any][]) {
+              const dName = String(dist.nameEn || '').replace(/ district$/i, '').toLowerCase();
+              if (!dName || !haystack.includes(dName)) continue;
+              setSelectedProvinceKey(pKey);
+              setSelectedDistrictKey(dKey);
+              const muni = (dist.municipalities || []).find((m: any) => {
+                const n = String(m.nameEn || m).toLowerCase().replace(/ (metropolitan city|sub-metropolitan city|municipality|rural municipality)$/i, '');
+                return n && haystack.includes(n);
+              });
+              setSelectedMunicipality(muni ? (muni.nameEn || muni) : '');
+              matched = true;
+              break;
+            }
+            if (matched) break;
+          }
+        } catch {
+          // Coordinates are still saved; the customer just fills the address by hand
+        }
+        setLocStatus('done');
+        setLocMessage(lang === 'ne' ? 'हालको लोकेसन सुरक्षित भयो। कृपया ठेगाना जाँच गर्नुहोस्।' : 'Current location saved. Please check the address below.');
+      },
+      (err) => {
+        setLocStatus('error');
+        setLocMessage(
+          err.code === err.PERMISSION_DENIED
+            ? (lang === 'ne' ? 'लोकेसनको अनुमति दिइएन। तपाईं ठेगाना आफैँ भर्न सक्नुहुन्छ।' : 'Location permission was denied. You can fill in the address manually.')
+            : (lang === 'ne' ? 'लोकेसन पत्ता लगाउन सकिएन।' : 'Could not determine your location.')
+        );
+      },
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
   };
 
   const handleCopy = (text: string, label: string) => {
@@ -166,6 +234,8 @@ export const OrderForm: React.FC = () => {
         busCounter: busCounter.trim(),
         addressText: [busCounter.trim(), selectedMunicipality, districtName, provinceName].filter(Boolean).join(', '),
         items,
+        latitude: coords?.latitude ?? null,
+        longitude: coords?.longitude ?? null,
         paymentMethod: selectedPaymentMethod,
         transactionId: transactionCode.trim() || undefined
       }
@@ -272,7 +342,8 @@ export const OrderForm: React.FC = () => {
 
   return (
     <div className="bg-zinc-50/50 min-h-screen text-zinc-900 font-sans py-8">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 space-y-8">
+      <div className={`mx-auto px-4 sm:px-6 grid grid-cols-1 gap-8 items-start ${orderFinalized ? 'max-w-4xl' : 'max-w-site lg:grid-cols-[minmax(0,1fr)_440px]'}`}>
+      <div className="min-w-0 space-y-8">
         
         {/* 1. SECTION BANNER - DEEP FOREST GREEN THEME */}
         <div className="bg-[#1a3a2a] p-6 sm:p-8 text-white text-left border-b-2 border-amber-500 shadow-md rounded-xs">
@@ -292,7 +363,31 @@ export const OrderForm: React.FC = () => {
           </p>
         </div>
 
+        {/* STEP INDICATOR */}
+        <ol className="grid grid-cols-3 gap-2 text-center">
+          {[
+            { n: 1, en: 'Items', ne: 'सामान' },
+            { n: 2, en: 'Delivery', ne: 'डेलिभरी' },
+            { n: 3, en: 'Payment', ne: 'भुक्तानी' }
+          ].map((s) => (
+            <li
+              key={s.n}
+              className={`py-2.5 text-xs sm:text-sm font-bold uppercase tracking-wider rounded-xs border-2 ${
+                step === s.n
+                  ? 'bg-[#1a3a2a] border-[#1a3a2a] text-amber-300'
+                  : step > s.n
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                    : 'bg-white border-zinc-200 text-zinc-400'
+              }`}
+            >
+              {step > s.n ? '✓ ' : `${s.n}. `}
+              {lang === 'ne' ? s.ne : s.en}
+            </li>
+          ))}
+        </ol>
+
         {/* 2. REQUISITION MANIFEST */}
+        {step === 1 && (
         <div className="border border-emerald-900/20 bg-white p-6 sm:p-7 shadow-sm text-left space-y-6 rounded-xs">
           <div className="flex items-center justify-between border-b border-zinc-200 pb-3">
             <div className="flex items-center gap-2 text-zinc-900 font-bold text-sm sm:text-base">
@@ -427,9 +522,20 @@ export const OrderForm: React.FC = () => {
               </p>
             </div>
           </div>
+
+          <button
+            type="button"
+            disabled={rawItems.length === 0}
+            onClick={() => goToStep(2)}
+            className="w-full py-4 bg-amber-400 hover:bg-amber-300 disabled:opacity-50 disabled:cursor-not-allowed text-zinc-950 font-black text-sm sm:text-base uppercase tracking-wider rounded-xs shadow-md transition cursor-pointer"
+          >
+            {lang === 'ne' ? 'अर्को: डेलिभरी विवरण →' : 'NEXT: DELIVERY DETAILS →'}
+          </button>
         </div>
+        )}
 
         {/* 3. DISPATCH FORM */}
+        {step === 2 && (
         <form onSubmit={handleOrderSubmit} className="border border-emerald-900/20 bg-white p-6 sm:p-8 shadow-sm text-left space-y-6 rounded-xs">
           <h3 className="text-lg sm:text-xl font-serif font-black text-zinc-950 border-b border-zinc-200 pb-3 flex items-center gap-2">
             <Truck size={18} className="text-emerald-800" />
@@ -486,6 +592,27 @@ export const OrderForm: React.FC = () => {
                 ? 'बसको बिल्टी र ट्र्याकिङ स्लिप सिधै इमेलमा प्राप्त गर्नको लागि।' 
                 : 'Required to receive live bus dispatch tracking and delivery slips directly via email.'}
             </p>
+          </div>
+
+          {/* USE CURRENT LOCATION - the browser shows its own allow/deny prompt */}
+          <div className="p-4 bg-zinc-50 border border-zinc-200 rounded-xs space-y-2">
+            <button
+              type="button"
+              onClick={handleUseCurrentLocation}
+              disabled={locStatus === 'asking'}
+              className="w-full sm:w-auto px-5 py-3 bg-[#1a3a2a] hover:bg-[#12271c] disabled:opacity-60 text-white font-bold text-xs sm:text-sm uppercase tracking-wider rounded-xs transition flex items-center justify-center gap-2 cursor-pointer"
+            >
+              {locStatus === 'asking' ? <Loader2 size={16} className="animate-spin" /> : <MapPin size={16} />}
+              <span>{lang === 'ne' ? 'हालको लोकेसन प्रयोग गर्नुहोस्' : 'Use my current location'}</span>
+            </button>
+            <p className="text-xs text-zinc-500">
+              {lang === 'ne'
+                ? 'तपाईंको ब्राउजरले अनुमति मागेछ। अनुमति दिएमा ठेगाना स्वतः भरिनेछ र लोकेसन अर्डरसँग सुरक्षित हुनेछ।'
+                : 'Your browser will ask for permission. If you allow it, we fill in the address and save the location with your order.'}
+            </p>
+            {locMessage && (
+              <p className={`text-xs font-semibold ${locStatus === 'error' ? 'text-red-700' : 'text-emerald-800'}`}>{locMessage}</p>
+            )}
           </div>
 
           {/* CASCADING NEPAL LOCATIONS */}
@@ -563,14 +690,14 @@ export const OrderForm: React.FC = () => {
 
             <div className="space-y-1.5">
               <label className="block text-xs sm:text-sm font-bold uppercase tracking-wider text-zinc-800">
-                {lang === 'ne' ? 'नजिकको बस काउन्टर / डेलिभरी पोइन्ट *' : 'Nearest Bus Counter / Drop Point *'}
+                {lang === 'ne' ? 'नजिकको ल्यान्डमार्क *' : 'Nearest Landmark *'}
               </label>
               <input
                 type="text"
                 required
                 value={busCounter}
                 onChange={(e) => setBusCounter(e.target.value)}
-                placeholder={lang === 'ne' ? 'उदा. नयाँ बसपार्क, गोलबजार, पृथ्वीचोक' : 'e.g. Gongabu Buspark, Golbazar, Prithvi Chowk'}
+                placeholder={lang === 'ne' ? 'उदा. मन्दिर, स्कुल, चोक, बसपार्क' : 'e.g. Temple, school, chowk, bus park'}
                 className="w-full px-4 py-3 text-sm sm:text-base font-medium text-zinc-900 bg-zinc-50 border border-zinc-300 rounded-xs focus:border-emerald-700 focus:bg-white focus:outline-none transition"
               />
             </div>
@@ -590,34 +717,29 @@ export const OrderForm: React.FC = () => {
           </div>
 
           {/* SUBMIT BUTTON */}
-          <div className="pt-2">
+          <div className="pt-2 flex flex-col-reverse sm:flex-row gap-3">
+            <button
+              type="button"
+              onClick={() => goToStep(1)}
+              className="sm:w-40 py-4 bg-white hover:bg-zinc-100 border-2 border-zinc-300 text-zinc-800 font-bold text-sm uppercase tracking-wider rounded-xs transition cursor-pointer"
+            >
+              ← {lang === 'ne' ? 'पछाडि' : 'Back'}
+            </button>
             <button
               type="submit"
-              disabled={isSubmitting}
-              className="w-full py-4 bg-amber-400 hover:bg-amber-300 active:scale-[0.99] text-zinc-950 font-black text-sm sm:text-base uppercase tracking-wider rounded-xs shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
+              className="flex-1 py-4 bg-amber-400 hover:bg-amber-300 active:scale-[0.99] text-zinc-950 font-black text-sm sm:text-base uppercase tracking-wider rounded-xs shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
             >
               <CreditCard size={18} />
-              <span>
-                {isSubmitting
-                  ? (lang === 'ne' ? 'गेटवे खुल्दैछ...' : 'OPENING GATEWAY...')
-                  : (lang === 'ne' ? 'भुक्तानी गर्न अगाडि बढ्नुहोस् (PROCEED TO PAYMENT)' : 'PROCEED TO PAYMENT GATEWAY')}
-              </span>
+              <span>{lang === 'ne' ? 'अर्को: भुक्तानी →' : 'NEXT: PAYMENT →'}</span>
             </button>
           </div>
         </form>
+        )}
 
-      </div>
-
-      {/* 4. PAYMENT GATEWAY MODAL */}
-      {showPaymentModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 sm:p-6 overflow-y-auto"
-          onClick={() => !orderFinalized && setShowPaymentModal(false)}
-        >
-          <div
-            className="bg-white w-full max-w-2xl sm:max-w-3xl rounded-md border border-emerald-900/40 shadow-2xl overflow-hidden my-auto text-left relative animate-in fade-in zoom-in-95 duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
+      {/* 4. PAYMENT STEP (inline page section, no popup) */}
+      {step === 3 && (
+        <div>
+          <div className="bg-white w-full rounded-md border border-emerald-900/40 shadow-md overflow-hidden text-left relative">
             {/* MODAL HEADER - DEEP FOREST GREEN */}
             <div className="bg-[#1a3a2a] p-6 sm:p-7 text-white border-b-2 border-amber-500 relative">
               <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#12271c] border border-emerald-800 text-amber-300 text-xs font-mono font-bold uppercase tracking-wider mb-2.5 rounded-xs">
@@ -636,11 +758,10 @@ export const OrderForm: React.FC = () => {
               {!orderFinalized && (
                 <button
                   type="button"
-                  onClick={() => setShowPaymentModal(false)}
-                  className="absolute top-6 right-6 text-zinc-300 hover:text-white p-2 rounded-full hover:bg-white/10 transition cursor-pointer"
-                  aria-label="Close modal"
+                  onClick={() => goToStep(2)}
+                  className="absolute top-6 right-6 text-zinc-300 hover:text-white px-3 py-1.5 text-xs font-bold uppercase tracking-wider rounded-xs hover:bg-white/10 transition cursor-pointer"
                 >
-                  <X size={22} />
+                  ← {lang === 'ne' ? 'पछाडि' : 'Back'}
                 </button>
               )}
             </div>
@@ -682,31 +803,29 @@ export const OrderForm: React.FC = () => {
                     <span className="font-mono font-bold text-zinc-950">{customerEmail}</span>
                   </div>
                   <div className="flex justify-between pt-0.5">
-                    <span className="text-zinc-500 font-bold uppercase text-xs">Drop Point:</span>
+                    <span className="text-zinc-500 font-bold uppercase text-xs">Landmark:</span>
                     <span className="font-bold text-zinc-950">{busCounter}, {selectedMunicipality}</span>
                   </div>
                 </div>
 
-                <div className="pt-3 flex flex-col sm:flex-row gap-3">
-                  <a
-                    href={`${WHATSAPP_URL}?text=${encodeURIComponent(
-                      `Namaste Hazaridevi Duck Farm! I have placed an order.\nOrder Ref: ${placedOrder?.ref || '-'}\nName: ${fullName}\nPhone:${phoneNumber}\nEmail: ${customerEmail}\nMethod:${selectedPaymentMethod.toUpperCase()}\nAmount: Rs. ${placedOrder?.total ?? totalAmount}\nTxn/Ref Code:${placedOrder?.txn || transactionCode || 'Direct Transfer'}\nDestination: ${busCounter},${selectedMunicipality}`
-                    )}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-1 py-4 bg-[#25D366] hover:bg-[#20ba59] text-white font-extrabold text-sm uppercase tracking-wider rounded-xs shadow-md transition flex items-center justify-center gap-2"
-                  >
-                    <span>💬 Send Slip on WhatsApp</span>
-                  </a>
+                {/* The farm is notified automatically by the server (email + WhatsApp) - nothing for the customer to send */}
+                <p className="text-sm text-zinc-700">
+                  {lang === 'ne'
+                    ? 'फार्मलाई तपाईंको अर्डरको जानकारी स्वतः पठाइएको छ। बसमा पठाएपछि बस नम्बर र बिल्टी इमेल गरिनेछ।'
+                    : "The farm has been notified of your order automatically. We'll email you the bus number and bilty once it's dispatched."}
+                </p>
+
+                <div className="pt-1">
                   <button
                     type="button"
                     onClick={() => {
-                      setShowPaymentModal(false);
                       setOrderFinalized(false);
+                      setStep(1);
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
                     }}
-                    className="px-8 py-4 bg-[#1a3a2a] hover:bg-[#12271c] text-white font-bold text-sm uppercase tracking-wider rounded-xs transition cursor-pointer"
+                    className="w-full py-4 bg-[#1a3a2a] hover:bg-[#12271c] text-white font-bold text-sm uppercase tracking-wider rounded-xs transition cursor-pointer"
                   >
-                    Close
+                    {lang === 'ne' ? 'बन्द गर्नुहोस्' : 'Close'}
                   </button>
                 </div>
 
@@ -1037,6 +1156,71 @@ export const OrderForm: React.FC = () => {
           </div>
         </div>
       )}
+
+      </div>
+
+      {/* ORDER SUMMARY SIDEBAR */}
+      {!orderFinalized && (
+        <aside className="lg:sticky lg:top-28 border border-emerald-900/20 bg-white shadow-sm text-left rounded-xs overflow-hidden">
+          <div className="bg-[#1a3a2a] px-6 py-5 border-b-2 border-amber-500 flex items-center gap-2 text-white">
+            <ShoppingBag size={17} className="text-amber-400" />
+            <h3 className="font-serif font-black text-xl">{lang === 'ne' ? 'अर्डर सारांश' : 'Order Summary'}</h3>
+          </div>
+
+          <div className="p-6 space-y-5">
+            {rawItems.length === 0 ? (
+              <p className="text-sm text-zinc-500 text-center py-4">
+                {lang === 'ne' ? 'कार्ट खाली छ।' : 'Your cart is empty.'}
+              </p>
+            ) : (
+              <ul className="divide-y divide-zinc-200">
+                {rawItems.map((item: any) => {
+                  const q = item.qty ?? item.quantity ?? 1;
+                  return (
+                    <li key={item.id} className="py-3.5 flex items-start justify-between gap-3 text-base">
+                      <div className="min-w-0">
+                        <p className="font-bold text-zinc-900 leading-snug">
+                          {lang === 'ne' ? (item.nameNe || item.titleNe || item.nameEn) : (item.nameEn || item.titleEn)}
+                        </p>
+                        <p className="text-sm font-mono text-zinc-500 mt-0.5">
+                          {q} × Rs. {(item.price ?? 0).toLocaleString()}
+                        </p>
+                      </div>
+                      <span className="font-mono font-bold text-zinc-900 shrink-0">Rs. {((item.price ?? 0) * q).toLocaleString()}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            <div className="flex items-center justify-between border-t-2 border-zinc-900 pt-3">
+              <span className="text-xs font-mono font-bold uppercase tracking-wider text-zinc-600">
+                {lang === 'ne' ? 'जम्मा' : 'Total'}
+              </span>
+              <span className="text-3xl font-black font-mono text-emerald-950">Rs. {totalAmount.toLocaleString()}</span>
+            </div>
+
+            {step >= 2 && (fullName || selectedMunicipality || busCounter) && (
+              <div className="border-t border-zinc-200 pt-4 text-sm space-y-1 text-zinc-700">
+                <p className="font-bold uppercase tracking-wider text-zinc-500">{lang === 'ne' ? 'डेलिभरी' : 'Deliver to'}</p>
+                {fullName && <p className="font-semibold text-zinc-900">{fullName}</p>}
+                {phoneNumber && <p className="font-mono">{phoneNumber}</p>}
+                <p>{[busCounter, selectedMunicipality, currentDistrict?.nameEn, currentProvince?.nameEn].filter(Boolean).join(', ')}</p>
+              </div>
+            )}
+
+            <div className="flex items-start gap-2 bg-emerald-50/70 border-l-4 border-emerald-600 px-4 py-3 text-sm text-zinc-700">
+              <Truck size={15} className="text-emerald-800 shrink-0 mt-0.5" />
+              <span>
+                {lang === 'ne'
+                  ? 'दैनिक रात्री बसमार्फत ७ वटै प्रदेशमा सुरक्षित ढुवानी।'
+                  : 'Daily night-bus dispatch to all 7 provinces.'}
+              </span>
+            </div>
+          </div>
+        </aside>
+      )}
+      </div>
 
     </div>
   );

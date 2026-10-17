@@ -5,7 +5,7 @@ import {
   Package, Settings, RefreshCw, LogOut, ExternalLink, 
   Phone, MessageSquare, Clock, 
   MapPin, Search, Globe, Calendar, Eye, Plus, Trash2, Edit3, CheckCircle2, XCircle, Upload, Image as ImageIcon, Loader2,
-  Bus, Check, Code, ShieldCheck, History, Video, Save, Tag, Mail, AlertTriangle, Bell
+  Bus, Check, Code, ShieldCheck, History, Video, Save, Tag, Mail, AlertTriangle, Bell, Banknote, Download, FileSpreadsheet
 } from 'lucide-react';
 import { DEFAULT_VIDEOS, type VideoData } from './YouTubeVideos';
 
@@ -337,43 +337,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
     const API_BASE_URL = getApiBaseUrl();
 
     try {
-      const storedSales = JSON.parse(localStorage.getItem('hz_farmer_listings') || '[]');
-      if (storedSales.length > 0) {
-        setFarmerListings(storedSales);
-      } else {
-        const sampleListings: FarmerListing[] = [
-          {
-            id: 'LST-101',
-            sellerName: 'Bishnu Prasad Yadav',
-            phone: '9812345678',
-            category: 'खाकी क्याम्पबेल हाँस / चल्ला',
-            productName: 'Original Khaki Campbell 25-Day Brooded',
-            ageOrWeight: '25 Days',
-            quantity: '80 Ducklings',
-            rate: '190',
-            location: 'Golbazar, Siraha',
-            description: 'Fully vaccinated with Duck Plague. Ready for delivery.',
-            date: '10/12/2026',
-            status: 'Pending'
-          },
-          {
-            id: 'LST-102',
-            sellerName: 'Santosh Kumar',
-            phone: '9845671230',
-            category: 'ताजा / ह्याचिङ अण्डा',
-            productName: 'Fertile Hatching Duck Eggs',
-            ageOrWeight: 'Fresh (2 Days)',
-            quantity: '300 pcs',
-            rate: '35',
-            location: 'Mirchaiya, Siraha',
-            description: '90%+ fertility guaranteed from parent stock.',
-            date: '10/11/2026',
-            status: 'Approved'
-          }
-        ];
-        setFarmerListings(sampleListings);
-        localStorage.setItem('hz_farmer_listings', JSON.stringify(sampleListings));
+      // Drop the demo listings (LST-101 / LST-102) that older versions stored in this browser
+      const storedAll: FarmerListing[] = JSON.parse(localStorage.getItem('hz_farmer_listings') || '[]');
+      const storedSales = storedAll.filter((l) => l.id !== 'LST-101' && l.id !== 'LST-102');
+      if (storedSales.length !== storedAll.length) {
+        localStorage.setItem('hz_farmer_listings', JSON.stringify(storedSales));
       }
+      setFarmerListings(storedSales);
     } catch (e) {
       console.error(e);
     }
@@ -426,26 +396,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
       const resProducts = await fetch(`${API_BASE_URL}/api/products`);
       const dataProducts = await resProducts.json();
 
-      if (dataProducts.success && Array.isArray(dataProducts.products) && dataProducts.products.length > 0) {
-        const backendIds = new Set(dataProducts.products.map((p: any) => String(p.id || p._id)));
-        const missingDefaults = DEFAULT_CATALOG_PRODUCTS.filter(def => !backendIds.has(String(def.id)));
-        const combined = [...dataProducts.products, ...missingDefaults];
-        syncProductsToStorage(combined);
+      if (dataProducts.success && Array.isArray(dataProducts.products)) {
+        // The database is the source of truth: show exactly what is stored there.
+        syncProductsToStorage(dataProducts.products);
       } else {
         const local = JSON.parse(localStorage.getItem('hz_live_products') || '[]');
-        if (local.length > 0) {
-          setProducts(local);
-        } else {
-          syncProductsToStorage(DEFAULT_CATALOG_PRODUCTS);
-        }
+        setProducts(local);
       }
     } catch (err) {
+      // Server unreachable: fall back to the last list we cached
       const local = JSON.parse(localStorage.getItem('hz_live_products') || '[]');
-      if (local.length > 0) {
-        setProducts(local);
-      } else {
-        syncProductsToStorage(DEFAULT_CATALOG_PRODUCTS);
-      }
+      setProducts(local);
     } finally {
       setLoading(false);
     }
@@ -924,6 +885,133 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
     }
   };
 
+  // ---------- BULK PRODUCT UPLOAD (Excel) ----------
+  const bulkFileInputRef = useRef<HTMLInputElement>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState<{ added: number; skipped: number; errors: string[] } | null>(null);
+
+  const TEMPLATE_COLUMNS = ['title', 'category', 'badge', 'description', 'minOrder', 'price', 'unit', 'imageUrl', 'inStock'];
+
+  const handleDownloadTemplate = async () => {
+    const XLSX = await import('xlsx');
+    const rows = [
+      {
+        title: 'EXAMPLE - delete this row',
+        category: 'pure-kc',
+        badge: 'Best Seller',
+        description: 'Short description shown on the product card',
+        minOrder: '25 ducklings',
+        price: 130,
+        unit: '/duckling',
+        imageUrl: '',
+        inStock: 'yes'
+      }
+    ];
+    const ws = XLSX.utils.json_to_sheet(rows, { header: TEMPLATE_COLUMNS });
+    ws['!cols'] = [{ wch: 40 }, { wch: 18 }, { wch: 16 }, { wch: 50 }, { wch: 18 }, { wch: 10 }, { wch: 12 }, { wch: 40 }, { wch: 10 }];
+
+    const help = [
+      ['Column', 'What to enter', 'Required'],
+      ['title', 'Product name', 'Yes'],
+      ['category', 'One of the category codes listed below', 'Yes'],
+      ['badge', 'Small label on the card, e.g. Best Seller (optional)', 'No'],
+      ['description', 'Short description', 'Yes'],
+      ['minOrder', 'Minimum order, e.g. 25 ducklings', 'No (default: 1 unit)'],
+      ['price', 'Number only, e.g. 130', 'Yes'],
+      ['unit', 'e.g. /duckling, /egg, /kg', 'No (default: /duckling)'],
+      ['imageUrl', 'Direct link to a photo (a web address ending in .jpg, .png or .webp). Leave empty for no photo, then use Edit on the product to upload a photo from your device.', 'No'],
+      ['inStock', 'yes or no', 'No (default: yes)'],
+      [],
+      ['Category code', 'Meaning'],
+      ...ADMIN_CATEGORIES.map((c) => [c.id, c.nameEn]),
+      [],
+      ['Rows whose title starts with EXAMPLE are skipped on upload.']
+    ];
+    const wsHelp = XLSX.utils.aoa_to_sheet(help);
+    wsHelp['!cols'] = [{ wch: 20 }, { wch: 60 }, { wch: 22 }];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Products');
+    XLSX.utils.book_append_sheet(wb, wsHelp, 'Instructions');
+    XLSX.writeFile(wb, 'hazaridevi-products-template.xlsx');
+  };
+
+  const handleBulkFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setBulkBusy(true);
+    setBulkResult(null);
+    const errors: string[] = [];
+    let added = 0;
+    let skipped = 0;
+
+    try {
+      const XLSX = await import('xlsx');
+      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+      const sheet = wb.Sheets['Products'] || wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
+
+      const token = localStorage.getItem('hz_customer_token');
+      const apiBase = getApiBaseUrl();
+      const categoryIds = ADMIN_CATEGORIES.map((c) => c.id);
+      const str = (v: unknown) => String(v ?? '').trim();
+
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        const line = i + 2; // header is row 1
+        const title = str(r.title);
+        if (!title && !str(r.description) && !str(r.price)) continue; // blank row
+        if (title.toUpperCase().startsWith('EXAMPLE')) { skipped++; continue; }
+
+        const price = Number(str(r.price).replace(/[^0-9.]/g, ''));
+        const rawCat = str(r.category).toLowerCase();
+        const cat = categoryIds.find((id) => id === rawCat)
+          || ADMIN_CATEGORIES.find((c) => c.nameEn.toLowerCase() === rawCat)?.id;
+
+        if (!title) { errors.push(`Row ${line}: title is missing`); continue; }
+        if (!str(r.description)) { errors.push(`Row ${line} (${title}): description is missing`); continue; }
+        if (!price || price <= 0) { errors.push(`Row ${line} (${title}): price must be a number above 0`); continue; }
+        if (!cat) { errors.push(`Row ${line} (${title}): unknown category "${str(r.category)}" (see Instructions sheet)`); continue; }
+
+        const stockText = str(r.inStock).toLowerCase();
+        const payload = {
+          title,
+          category: cat,
+          badge: str(r.badge) || undefined,
+          description: str(r.description),
+          minOrder: str(r.minOrder) || '1 unit',
+          price,
+          unit: str(r.unit) || '/duckling',
+          imageUrl: str(r.imageUrl),
+          inStock: !['no', 'n', 'false', '0', 'out'].includes(stockText)
+        };
+
+        try {
+          const res = await fetch(`${apiBase}/api/admin/products`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify(payload)
+          });
+          if (res.ok) added++;
+          else {
+            const body = await res.json().catch(() => ({}));
+            errors.push(`Row ${line} (${title}): ${body.message || 'server rejected it'}`);
+          }
+        } catch {
+          errors.push(`Row ${line} (${title}): could not reach the server`);
+        }
+      }
+    } catch {
+      errors.push('Could not read this file. Please use the downloaded template (.xlsx).');
+    }
+
+    setBulkResult({ added, skipped, errors });
+    setBulkBusy(false);
+    if (added > 0) fetchDashboardData();
+  };
+
   const handleSaveVideoSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -1017,815 +1105,631 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
   const displayedActiveOrders = activeOrders.filter(filterMatches);
   const displayedHistoryOrders = completedOrders.filter(filterMatches);
 
+  const T = (en: string, ne: string) => (adminLang === 'ne' ? ne : en);
+  const money = (n: number) => 'Rs. ' + Number(n || 0).toLocaleString('en-IN');
+
+  const navItems: { key: typeof activeTab; label: string; count: number | null; Icon: React.ElementType }[] = [
+    { key: 'orders', label: T('Active orders', 'सक्रिय अर्डर'), count: activeOrders.length, Icon: Package },
+    { key: 'farmer_sales', label: T('Farmer sales', 'किसान बिक्री'), count: farmerListings.length, Icon: Tag },
+    { key: 'history', label: T('Order history', 'अर्डर इतिहास'), count: completedOrders.length, Icon: History },
+    { key: 'visits', label: T('Farm visits', 'फार्म भ्रमण'), count: visits.length, Icon: Calendar },
+    { key: 'products', label: T('Products', 'उत्पादन'), count: products.length, Icon: Edit3 },
+    { key: 'settings', label: T('Media & settings', 'मिडिया र सेटिङ'), count: null, Icon: Settings }
+  ];
+
+  const pageTitles: Record<typeof activeTab, [string, string]> = {
+    orders: [T('Active orders', 'सक्रिय अर्डर'), T('Track payments, dispatch buses and keep buyers updated.', 'भुक्तानी, बस पठाउने र खरिदकर्तालाई जानकारी दिनुहोस्।')],
+    farmer_sales: [T('Farmer marketplace', 'किसान बजार'), T('Local farmers and customers who submitted ducklings, eggs and farm produce for sale.', 'बिक्रीका लागि हाँसका चल्ला, अण्डा र उत्पादन पठाउने किसान तथा ग्राहक।')],
+    history: [T('Order history', 'अर्डर इतिहास'), T('Completed orders live here.', 'सम्पन्न अर्डरहरू यहाँ हुन्छन्।')],
+    visits: [T('Farm visits', 'फार्म भ्रमण'), T('Visit requests from buyers.', 'खरिदकर्ताका भ्रमण अनुरोध।')],
+    products: [T('Products', 'उत्पादन'), T('Everything that shows in your public shop.', 'तपाईंको सार्वजनिक पसलमा देखिने सबै उत्पादन।')],
+    settings: [T('Media & settings', 'मिडिया र सेटिङ'), T('Homepage banner, gallery footage and channel link.', 'होमपेज ब्यानर, ग्यालरी भिडियो र च्यानल लिङ्क।')]
+  };
+
+  const kpis: { label: string; value: string; Icon: React.ElementType; bg: string; fg: string; onClick?: () => void; badge?: number }[] = [
+    { label: T('Active orders', 'सक्रिय अर्डर'), value: String(displayedActiveOrdersCount), Icon: Package, bg: '#E3EFE6', fg: '#17553A' },
+    { label: T('Pending orders', 'पर्खिरहेका'), value: String(displayedPendingCount), Icon: Clock, bg: '#FCE9BE', fg: '#7A4A00' },
+    { label: T('Farmer sales', 'किसान बिक्री'), value: String(displayedFarmerSalesCount), Icon: Tag, bg: '#E3EFE6', fg: '#17553A' },
+    { label: T('Farm visits', 'फार्म भ्रमण'), value: String(displayedVisitsCount), Icon: Calendar, bg: '#FCE9BE', fg: '#7A4A00', onClick: () => handleTabClick('visits'), badge: unreadVisitsCount },
+    { label: T('Completed', 'सम्पन्न'), value: String(displayedCompletedCount), Icon: CheckCircle2, bg: '#EFE9D8', fg: '#5E6B62' },
+    { label: T('Total revenue', 'कुल आम्दानी'), value: 'Rs.' + totalRevenue.toLocaleString('en-IN'), Icon: Banknote, bg: '#FBE3D3', fg: '#9A3F10' }
+  ];
+
+  const btnGhost = 'inline-flex items-center justify-center gap-2 h-11 box-border px-4 rounded-xl border border-[#DDD5BF] bg-white text-[#1A2A21] font-semibold text-sm cursor-pointer hover:brightness-95 transition';
+
+  const orderSteps: { key: string; label: string }[] = [
+    { key: 'PENDING', label: T('Pending', 'पेन्डिङ') },
+    { key: 'CONFIRMED', label: T('Confirmed', 'पक्का') },
+    { key: 'PACKED', label: T('Packed', 'प्याक') },
+    { key: 'IN_TRANSIT', label: T('On bus', 'बाटोमा') },
+    { key: 'ARRIVED', label: T('Arrived', 'पुग्यो') },
+    { key: 'DELIVERED', label: T('Delivered', 'डेलिभर') }
+  ];
+  const stepClass = (state: 'current' | 'done' | 'future') =>
+    'inline-flex items-center gap-1.5 min-h-[40px] box-border px-4 rounded-full text-[13px] font-bold border transition cursor-pointer disabled:opacity-60 disabled:cursor-wait ' +
+    (state === 'current'
+      ? 'border-[#1D4A38] bg-[#1D4A38] text-white'
+      : state === 'done'
+      ? 'border-[#BFD9C8] bg-[#E3EFE6] text-[#17553A]'
+      : 'border-[#DDD5BF] bg-white text-[#5E6B62] hover:bg-[#F5F1E6]');
+
   return (
-    <div className="min-h-screen bg-zinc-100 text-zinc-900 font-sans flex flex-col justify-between">
-      <div>
-        {/* LIVE NOTIFICATION TOAST BANNER */}
+    <div
+      className="min-h-screen flex flex-wrap bg-[#F5F1E6] text-[#1A2A21] text-[15px] leading-snug text-left"
+      style={{ fontFamily: "'Figtree','Noto Sans Devanagari',system-ui,sans-serif" }}
+    >
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Figtree:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;600&display=swap');
+        .hz-display{font-family:'Bricolage Grotesque','Noto Sans Devanagari',sans-serif}
+        .hz-admin button:focus-visible,.hz-admin a:focus-visible,.hz-admin input:focus-visible,.hz-admin select:focus-visible{outline:2px solid #1D6B4C;outline-offset:2px}`}</style>
+
+      {/* SIDEBAR */}
+      <aside className="hz-admin w-full md:w-[260px] md:shrink-0 box-border bg-[#12301F] text-[#D7E4DA] px-[18px] py-7 flex flex-col gap-7 md:sticky md:top-0 md:h-screen md:overflow-y-auto">
+        <div className="flex items-center gap-3 px-1.5">
+          <div className="hz-display w-11 h-11 rounded-[14px] bg-[#F4B63B] text-[#2A1B00] flex items-center justify-center font-bold text-lg">HD</div>
+          <div className="hz-display font-bold text-lg text-white leading-tight">
+            {adminLang === 'ne' ? <>हजारीदेवी<br />डक फार्म</> : <>Hazaridevi<br />Duck Farm</>}
+          </div>
+        </div>
+
+        <nav aria-label="Admin sections" className="flex md:flex-col gap-1.5 overflow-x-auto md:overflow-visible">
+          {navItems.map(({ key, label, count, Icon }) => {
+            const on = activeTab === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => handleTabClick(key)}
+                aria-current={on ? 'page' : undefined}
+                className={`flex items-center gap-3 md:w-full box-border px-3.5 min-h-[46px] border-0 rounded-xl text-[15px] font-semibold text-left cursor-pointer whitespace-nowrap transition ${
+                  on ? 'bg-[#F4B63B] text-[#2A1B00]' : 'bg-transparent text-[#D7E4DA] hover:bg-[#1F4A36]'
+                }`}
+              >
+                <Icon size={20} strokeWidth={1.8} />
+                <span className="flex-1">{label}</span>
+                {count !== null && (
+                  <span className={`min-w-[24px] box-border px-2 py-0.5 rounded-full text-xs font-bold text-center ${on ? 'bg-[#2A1B00] text-[#F4B63B]' : 'bg-[#1F4A36] text-[#D7E4DA]'}`}>
+                    {count}
+                  </span>
+                )}
+                {key === 'visits' && unreadVisitsCount > 0 && (
+                  <span className="bg-red-600 text-white text-[10px] font-black px-1.5 rounded-full">+{unreadVisitsCount}</span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="md:mt-auto flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={onBackToHome}
+            className="flex items-center gap-2.5 min-h-[44px] box-border px-3.5 rounded-xl border border-[#2F5A45] bg-transparent text-white font-semibold text-sm cursor-pointer hover:bg-[#1F4A36] transition"
+          >
+            <Eye size={18} strokeWidth={1.8} />
+            {T('View site', 'साइट हेर्नुहोस्')}
+          </button>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="flex items-center gap-2.5 min-h-[44px] box-border px-3.5 rounded-xl border-0 bg-[#C8402A] text-white font-semibold text-sm text-left cursor-pointer hover:brightness-110 transition"
+          >
+            <LogOut size={18} strokeWidth={1.8} />
+            {T('Log out', 'लगआउट')}
+          </button>
+        </div>
+      </aside>
+
+      {/* MAIN */}
+      <main className="hz-admin flex-1 basis-[560px] min-w-0 box-border px-4 sm:px-8 pt-7 flex flex-col gap-6">
         {liveNotification && (
-          <div className="bg-amber-500 text-zinc-950 font-mono font-black text-xs sm:text-sm py-3 px-4 text-center sticky top-0 z-50 shadow-lg flex items-center justify-center gap-2 animate-bounce">
-            <Bell size={18} className="animate-spin" />
+          <div className="bg-[#F4B63B] text-[#2A1B00] font-bold text-sm py-3 px-4 rounded-xl flex items-center justify-center gap-2 shadow">
+            <Bell size={18} />
             <span>{liveNotification}</span>
           </div>
         )}
 
-        {/* Header - Deep Forest Green Theme */}
-        <header className="bg-[#1a3a2a] text-white border-b-2 border-amber-500 sticky top-0 z-30 shadow-md">
-          <div className="max-w-site mx-auto px-4 py-3.5 flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-amber-400 bg-white flex items-center justify-center shrink-0 p-0.5 shadow-sm">
-                <img src="/logo.png" alt="Logo" className="w-full h-full object-cover" />
-              </div>
-              <div className="text-left">
-                <h1 className="text-base sm:text-lg font-serif font-black text-white tracking-tight leading-tight">
-                  {adminLang === 'ne' ? 'हजारीदेवी डक फार्म - व्यवस्थापन प्यानल' : 'Hazaridevi Duck Farm - Admin Panel'}
-                </h1>
-                <p className="text-[11px] font-mono text-amber-300 font-bold tracking-wider uppercase mt-0.5">
-                  {adminLang === 'ne' ? 'अर्डर, बस काउन्टर ट्र्याकिङ, किसान बजार र भुक्तानी' : 'Orders, Bus Dispatch Tracking, Farmer Marketplace & Payments'}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2.5">
-              <button
-                type="button"
-                onClick={toggleMetricsView}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xs text-xs font-bold uppercase tracking-wider transition cursor-pointer border ${
-                  isMetricsClearedView
-                    ? 'bg-emerald-700 hover:bg-emerald-600 border-emerald-500 text-white'
-                    : 'bg-zinc-800 hover:bg-zinc-700 border-zinc-600 text-zinc-200'
-                }`}
-                title="Database will NOT be deleted, only display is cleared to 0"
-              >
-                <Eye size={13} className="text-amber-400" />
-                <span>
-                  {isMetricsClearedView 
-                    ? (adminLang === 'ne' ? 'तथ्याङ्क देखाउनुहोस्' : 'Restore Metrics') 
-                    : (adminLang === 'ne' ? 'तथ्याङ्क ० बनाउनुहोस्' : 'Zero Metrics (Display)')}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setAdminLang(adminLang === 'ne' ? 'en' : 'ne')}
-                className="inline-flex items-center gap-1.5 bg-amber-400 hover:bg-amber-300 text-zinc-950 text-xs font-black uppercase tracking-wider px-3 py-2 rounded-xs shadow-sm transition cursor-pointer"
-              >
-                <Globe size={13} />
-                <span>{adminLang === 'ne' ? 'English' : 'नेपाली'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={fetchDashboardData}
-                disabled={loading}
-                className="inline-flex items-center gap-1.5 bg-[#12271c] hover:bg-black/50 border border-emerald-700 text-white text-xs font-bold uppercase tracking-wider px-3 py-2 rounded-xs transition cursor-pointer"
-              >
-                <RefreshCw size={13} className={loading ? 'animate-spin text-amber-400' : 'text-amber-400'} />
-                <span>{adminLang === 'ne' ? 'रिफ्रेस' : 'Refresh'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={onBackToHome}
-                className="bg-[#12271c] hover:bg-black/50 border border-emerald-700 text-white text-xs font-bold uppercase tracking-wider px-3 py-2 rounded-xs transition cursor-pointer"
-              >
-                {adminLang === 'ne' ? 'वेबसाइट हेर्नुहोस्' : 'View Site'}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="inline-flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold uppercase tracking-wider px-3 py-2 rounded-xs shadow transition cursor-pointer"
-              >
-                <LogOut size={13} />
-                <span>{adminLang === 'ne' ? 'लगआउट' : 'Logout'}</span>
-              </button>
-            </div>
+        {/* Top bar */}
+        <header className="flex flex-wrap items-end justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="hz-display m-0 font-bold text-[34px] leading-[1.1] tracking-tight">{pageTitles[activeTab][0]}</h1>
+            <p className="mt-1.5 mb-0 text-[15px] text-[#5E6B62]">{pageTitles[activeTab][1]}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <label className="flex items-center gap-2 h-11 box-border px-3.5 bg-white border border-[#DDD5BF] rounded-xl min-w-[200px]">
+              <Search size={18} className="text-[#5E6B62] shrink-0" />
+              <input
+                type="search"
+                aria-label="Search"
+                placeholder={T('Search', 'खोज्नुहोस्')}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="border-0 outline-none bg-transparent w-full text-sm text-[#1A2A21]"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={toggleMetricsView}
+              aria-pressed={isMetricsClearedView}
+              title="Database will NOT be deleted, only display is cleared to 0"
+              className={`inline-flex items-center gap-2 h-11 box-border px-4 rounded-xl font-semibold text-sm cursor-pointer transition border ${
+                isMetricsClearedView ? 'border-[#12301F] bg-[#12301F] text-white' : 'border-[#DDD5BF] bg-white text-[#1A2A21]'
+              }`}
+            >
+              <Eye size={18} strokeWidth={1.8} />
+              {isMetricsClearedView ? T('Restore metrics', 'तथ्याङ्क देखाउनुहोस्') : T('Zero metrics (display)', 'मेट्रिक्स शून्य (प्रदर्शन)')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setAdminLang(adminLang === 'ne' ? 'en' : 'ne')}
+              className="inline-flex items-center gap-2 h-11 box-border px-4 rounded-xl border-0 bg-[#F4B63B] text-[#2A1B00] font-bold text-sm cursor-pointer hover:brightness-95 transition"
+            >
+              <Globe size={18} strokeWidth={1.8} />
+              {adminLang === 'ne' ? 'English' : 'नेपाली'}
+            </button>
+            <button type="button" onClick={fetchDashboardData} disabled={loading} aria-label="Refresh" className={btnGhost}>
+              <RefreshCw size={18} strokeWidth={1.8} className={loading ? 'animate-spin' : ''} />
+              {T('Refresh', 'रिफ्रेस')}
+            </button>
           </div>
         </header>
 
-        {/* Main Body */}
-        <main className="max-w-site mx-auto px-4 py-8 space-y-6">
-          
-          {/* Top Metric Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 text-left">
-            <div className="bg-white p-4 border border-zinc-200 shadow-sm flex items-center justify-between rounded-xs">
-              <div>
-                <p className="text-[11px] font-mono font-bold text-zinc-500 uppercase tracking-wider">
-                  {adminLang === 'ne' ? 'सक्रिय अर्डरहरू' : 'Active Orders'}
-                </p>
-                <p className="text-xl font-serif font-black text-zinc-900 mt-1">
-                  {displayedActiveOrdersCount}
-                </p>
-              </div>
-              <div className="w-10 h-10 bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center justify-center rounded-xs shrink-0">
-                <Package size={18} />
-              </div>
-            </div>
-
-            <div className="bg-white p-4 border border-zinc-200 shadow-sm flex items-center justify-between rounded-xs">
-              <div>
-                <p className="text-[11px] font-mono font-bold text-zinc-500 uppercase tracking-wider">
-                  {adminLang === 'ne' ? 'पेन्डिङ अर्डर' : 'Pending Orders'}
-                </p>
-                <p className="text-xl font-serif font-black text-amber-600 mt-1">
-                  {displayedPendingCount}
-                </p>
-              </div>
-              <div className="w-10 h-10 bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center rounded-xs shrink-0">
-                <Clock size={18} />
-              </div>
-            </div>
-
-            <div className="bg-white p-4 border border-zinc-200 shadow-sm flex items-center justify-between rounded-xs">
-              <div>
-                <p className="text-[11px] font-mono font-bold text-zinc-500 uppercase tracking-wider">
-                  {adminLang === 'ne' ? 'किसान बिक्री' : 'Farmer Sales'}
-                </p>
-                <p className="text-xl font-serif font-black text-emerald-800 mt-1">
-                  {displayedFarmerSalesCount}
-                </p>
-              </div>
-              <div className="w-10 h-10 bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center justify-center rounded-xs shrink-0">
-                <Tag size={18} />
-              </div>
-            </div>
-
-            {/* FARM VISITS METRIC CARD */}
-            <div 
-              onClick={() => handleTabClick('visits')}
-              className="bg-white p-4 border border-emerald-700/60 hover:border-emerald-700 shadow-sm flex items-center justify-between rounded-xs cursor-pointer group transition relative"
-            >
-              {unreadVisitsCount > 0 && (
-                <span className="absolute -top-2 -right-2 bg-red-600 text-white font-mono font-black text-[10px] px-2 py-0.5 rounded-full shadow-md animate-pulse">
-                  +{unreadVisitsCount} New
-                </span>
-              )}
-              <div>
-                <p className="text-[11px] font-mono font-bold text-amber-800 uppercase tracking-wider group-hover:underline">
-                  {adminLang === 'ne' ? 'फार्म भिजिट्स' : 'Farm Visits'}
-                </p>
-                <p className="text-xl font-serif font-black text-zinc-900 mt-1">
-                  {displayedVisitsCount}
-                </p>
-              </div>
-              <div className="w-10 h-10 bg-amber-50 text-amber-700 border border-amber-300 flex items-center justify-center rounded-xs shrink-0">
-                <Calendar size={18} />
-              </div>
-            </div>
-
-            <div className="bg-white p-4 border border-zinc-200 shadow-sm flex items-center justify-between rounded-xs">
-              <div>
-                <p className="text-[11px] font-mono font-bold text-zinc-500 uppercase tracking-wider">
-                  {adminLang === 'ne' ? 'इतिहास/सम्पन्न' : 'Completed'}
-                </p>
-                <p className="text-xl font-serif font-black text-zinc-900 mt-1">
-                  {displayedCompletedCount}
-                </p>
-              </div>
-              <div className="w-10 h-10 bg-zinc-100 text-zinc-800 border border-zinc-200 flex items-center justify-center rounded-xs shrink-0">
-                <CheckCircle2 size={18} className="text-emerald-700" />
-              </div>
-            </div>
-
-            <div className="bg-white p-4 border border-zinc-200 shadow-sm flex items-center justify-between rounded-xs">
-              <div>
-                <p className="text-[11px] font-mono font-bold text-zinc-500 uppercase tracking-wider">
-                  {adminLang === 'ne' ? 'कुल आम्दानी' : 'Total Revenue'}
-                </p>
-                <p className="text-lg font-mono font-bold text-zinc-900 mt-1 truncate max-w-[110px]">
-                  Rs.{totalRevenue.toLocaleString()}
-                </p>
-              </div>
-              <div className="w-10 h-10 bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center font-bold text-base select-none rounded-xs shrink-0">
-                रू
-              </div>
-            </div>
-          </div>
-
-          {/* Tab Switcher Bar */}
-          <div className="bg-white p-4 border border-zinc-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4 rounded-xs">
-            <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto">
-              <button
-                type="button"
-                onClick={() => handleTabClick('orders')}
-                className={`flex items-center gap-2 px-4 py-2 text-xs font-mono font-bold uppercase tracking-wider transition cursor-pointer whitespace-nowrap rounded-xs border ${
-                  activeTab === 'orders' 
-                    ? 'bg-[#1a3a2a] text-amber-300 border-amber-500 shadow-sm' 
-                    : 'bg-zinc-50 text-zinc-600 border-zinc-200 hover:bg-zinc-100'
-                }`}
-              >
-                <Package size={14} />
-                <span>{adminLang === 'ne' ? 'सक्रिय अर्डर' : 'Active Orders'} ({activeOrders.length})</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleTabClick('farmer_sales')}
-                className={`flex items-center gap-2 px-4 py-2 text-xs font-mono font-bold uppercase tracking-wider transition cursor-pointer whitespace-nowrap rounded-xs border ${
-                  activeTab === 'farmer_sales' 
-                    ? 'bg-[#1a3a2a] text-amber-300 border-amber-500 shadow-sm' 
-                    : 'bg-zinc-50 text-emerald-800 border-zinc-200 hover:bg-emerald-50'
-                }`}
-              >
-                <Tag size={14} />
-                <span>🌾 {adminLang === 'ne' ? 'किसान बजार (विक्री)' : 'Farmer Sales'} ({farmerListings.length})</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleTabClick('history')}
-                className={`flex items-center gap-2 px-4 py-2 text-xs font-mono font-bold uppercase tracking-wider transition cursor-pointer whitespace-nowrap rounded-xs border ${
-                  activeTab === 'history' 
-                    ? 'bg-[#1a3a2a] text-amber-300 border-amber-500 shadow-sm' 
-                    : 'bg-zinc-50 text-zinc-600 border-zinc-200 hover:bg-zinc-100'
-                }`}
-              >
-                <History size={14} />
-                <span>{adminLang === 'ne' ? 'डेलिभरी इतिहास / सम्पन्न' : 'Order History'} ({completedOrders.length})</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleTabClick('visits')}
-                className={`relative flex items-center gap-2 px-4 py-2 text-xs font-mono font-bold uppercase tracking-wider transition cursor-pointer whitespace-nowrap rounded-xs border ${
-                  activeTab === 'visits' 
-                    ? 'bg-[#1a3a2a] text-amber-300 border-amber-500 shadow-sm' 
-                    : 'bg-zinc-50 text-zinc-600 border-zinc-200 hover:bg-zinc-100'
-                }`}
-              >
-                <Calendar size={14} />
-                <span>{adminLang === 'ne' ? 'फार्म भिजिटहरू' : 'Farm Visits'} ({visits.length})</span>
-                {unreadVisitsCount > 0 && (
-                  <span className="bg-red-600 text-white font-mono font-black text-[10px] px-1.5 py-0.2 rounded-full ml-1">
-                    +{unreadVisitsCount}
-                  </span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleTabClick('products')}
-                className={`flex items-center gap-2 px-4 py-2 text-xs font-mono font-bold uppercase tracking-wider transition cursor-pointer whitespace-nowrap rounded-xs border ${
-                  activeTab === 'products' 
-                    ? 'bg-[#1a3a2a] text-amber-300 border-amber-500 shadow-sm' 
-                    : 'bg-zinc-50 text-zinc-600 border-zinc-200 hover:bg-zinc-100'
-                }`}
-              >
-                <Edit3 size={14} />
-                <span>{adminLang === 'ne' ? 'उत्पादनहरू' : 'Products'} ({products.length})</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleTabClick('settings')}
-                className={`flex items-center gap-2 px-4 py-2 text-xs font-mono font-bold uppercase tracking-wider transition cursor-pointer whitespace-nowrap rounded-xs border ${
-                  activeTab === 'settings' 
-                    ? 'bg-[#1a3a2a] text-amber-300 border-amber-500 shadow-sm' 
-                    : 'bg-zinc-50 text-zinc-600 border-zinc-200 hover:bg-zinc-100'
-                }`}
-              >
-                <Settings size={14} />
-                <span>{adminLang === 'ne' ? 'मिडिया र सेटिङ' : 'Media & Settings'}</span>
-              </button>
-            </div>
-
-            {(activeTab === 'orders' || activeTab === 'history' || activeTab === 'farmer_sales') && (
-              <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-                <div className="relative flex-1 sm:w-64">
-                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-                  <input
-                    type="text"
-                    placeholder={adminLang === 'ne' ? 'खोज्नुहोस्...' : 'Search...'}
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 bg-zinc-50 border border-zinc-300 text-xs font-mono text-zinc-900 focus:border-emerald-700 outline-none rounded-xs"
-                  />
+        {/* KPIs */}
+        <section aria-label="Summary" className="grid gap-3.5" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))' }}>
+          {kpis.map((k) => {
+            const body = (
+              <>
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold tracking-[0.06em] uppercase text-[#5E6B62]">{k.label}</div>
+                  <div className="hz-display mt-1 font-bold text-[30px] leading-[1.1]">{k.value}</div>
                 </div>
-
-                {activeTab === 'orders' && (
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    className="bg-zinc-50 border border-zinc-300 text-xs font-mono font-bold px-3 py-2 focus:border-emerald-700 outline-none cursor-pointer rounded-xs"
-                  >
-                    <option value="ALL">All Active Statuses</option>
-                    <option value="PENDING">Pending</option>
-                    <option value="CONFIRMED">Confirmed</option>
-                    <option value="PACKED">Packed</option>
-                    <option value="IN_TRANSIT">In Transit (बाटोमा छ)</option>
-                  </select>
-                )}
-              </div>
-            )}
-
-            {activeTab === 'products' && (
-              <button
-                type="button"
-                onClick={handleOpenAddModal}
-                className="inline-flex items-center gap-1.5 bg-amber-400 hover:bg-amber-300 text-zinc-950 font-black text-xs uppercase tracking-wider px-4 py-2 transition shadow-sm cursor-pointer rounded-xs"
-              >
-                <Plus size={15} />
-                <span>{adminLang === 'ne' ? '+ नयाँ उत्पादन थप्नुहोस्' : '+ Add New Product'}</span>
+                <div className="shrink-0 w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: k.bg, color: k.fg }}>
+                  <k.Icon size={20} strokeWidth={1.8} />
+                </div>
+              </>
+            );
+            const cls = 'relative bg-white border border-[#E4DDCB] rounded-2xl px-[18px] py-4 flex items-center justify-between gap-3 text-left';
+            return k.onClick ? (
+              <button key={k.label} type="button" onClick={k.onClick} className={cls + ' cursor-pointer hover:border-[#1D4A38] transition'}>
+                {k.badge ? <span className="absolute -top-2 -right-2 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow">+{k.badge} New</span> : null}
+                {body}
               </button>
-            )}
-          </div>
+            ) : (
+              <div key={k.label} className={cls}>{body}</div>
+            );
+          })}
+        </section>
 
           {/* Tab 1: ACTIVE ORDERS QUEUE */}
           {activeTab === 'orders' && (
-            <div className="space-y-4">
+            <section aria-label="Active orders" className="flex flex-col gap-[18px]">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-sm text-[#5E6B62]">
+                  {displayedActiveOrders.length} {T('of', 'मध्ये')} {activeOrders.length} {T('active orders', 'सक्रिय अर्डर')}
+                </div>
+                <label className="flex items-center gap-2 text-sm font-semibold">
+                  {T('Status', 'स्थिति')}
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="h-11 box-border px-3 rounded-xl border border-[#DDD5BF] bg-white text-[#1A2A21] text-sm cursor-pointer"
+                  >
+                    <option value="ALL">{T('All active statuses', 'सबै सक्रिय स्थिति')}</option>
+                    <option value="PENDING">Pending</option>
+                    <option value="CONFIRMED">Confirmed</option>
+                    <option value="PACKED">Packed</option>
+                    <option value="IN_TRANSIT">On bus (बाटोमा)</option>
+                  </select>
+                </label>
+              </div>
+
               {displayedActiveOrders.length === 0 ? (
-                <div className="bg-white p-12 text-center border border-zinc-200 shadow-sm space-y-2 rounded-xs">
-                  <Package size={38} className="mx-auto text-zinc-300" />
-                  <p className="font-serif font-bold text-zinc-800 text-base">
-                    {adminLang === 'ne' ? 'कुनै सक्रिय अर्डर छैन (सबै डेलिभर भइसकेका छन्)' : 'No active orders in queue!'}
-                  </p>
-                  <p className="text-xs font-serif text-zinc-500">
-                    {adminLang === 'ne' ? 'सम्पन्न भइसकेका अर्डरहरू "डेलिभरी इतिहास" ट्याबमा हेर्न सक्नुहुन्छ।' : 'Delivered & Arrived orders have moved to the "Order History" tab.'}
-                  </p>
+                <div className="bg-white border border-dashed border-[#CFC6AD] rounded-[18px] py-12 px-6 text-center text-[#5E6B62]">
+                  {activeOrders.length === 0
+                    ? T('No active orders in the queue. Delivered orders move to Order history.', 'कुनै सक्रिय अर्डर छैन। डेलिभर भएका अर्डर इतिहासमा जान्छन्।')
+                    : T('No orders match this search or status.', 'यो खोज वा स्थितिसँग मिल्ने अर्डर छैन।')}
                 </div>
               ) : (
                 displayedActiveOrders.map((order) => {
                   const orderId = (order.id || order._id) as string;
-                  const mapLink = order.location?.mapUrl || `https://www.google.com/maps?q=${order.location?.latitude},${order.location?.longitude}`;
+                  const hasCoords = typeof order.location?.latitude === 'number' && typeof order.location?.longitude === 'number';
+                  const mapLink = order.location?.mapUrl || (hasCoords
+                    ? `https://www.google.com/maps?q=${order.location.latitude},${order.location.longitude}`
+                    : `https://www.google.com/maps?q=${encodeURIComponent(order.addressText || '')}`);
+                  const mapEmbed = hasCoords
+                    ? `https://maps.google.com/maps?q=${order.location.latitude},${order.location.longitude}&z=15&output=embed`
+                    : null;
                   const whatsappUrl = generateWhatsAppUrl(order);
                   const payMethod = (order.paymentMethod || 'esewa').toLowerCase();
                   const normalizedStatus = (order.status || 'PENDING').toUpperCase();
+                  const isTerminated = normalizedStatus === 'TERMINATED' || normalizedStatus === 'LOST_IN_TRANSIT';
+                  const curIdx = orderSteps.findIndex((st) => st.key === normalizedStatus);
+                  const busy = updatingId === orderId;
 
                   return (
-                    <div
-                      key={orderId}
-                      className="bg-white border border-zinc-200 shadow-xs hover:shadow-md transition p-5 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-center text-left rounded-xs"
-                    >
-                      <div className="lg:col-span-7 space-y-3">
+                    <article key={orderId} className="bg-white border border-[#E4DDCB] rounded-[18px] overflow-hidden flex flex-wrap">
+                      {/* LEFT: details */}
+                      <div className="flex-[1_1_440px] min-w-0 box-border p-6 flex flex-col gap-[18px]">
                         <div className="flex flex-wrap items-center gap-2.5">
-                          <h3 className="font-serif font-bold text-zinc-900 text-lg leading-tight">{order.customerName}</h3>
-                          
-                          <select
-                            value={normalizedStatus}
-                            disabled={updatingId === orderId}
-                            onChange={(e) => handleStatusChange(orderId, e.target.value)}
-                            className={`text-[11px] font-mono font-bold uppercase px-2.5 py-1 border outline-none cursor-pointer transition rounded-xs ${
-                              normalizedStatus === 'PENDING'
-                                ? 'bg-amber-50 text-amber-800 border-amber-400'
-                                : normalizedStatus === 'CONFIRMED'
-                                ? 'bg-blue-50 text-blue-800 border-blue-400'
-                                : normalizedStatus === 'PACKED'
-                                ? 'bg-zinc-100 text-zinc-800 border-zinc-400'
-                                : normalizedStatus === 'IN_TRANSIT'
-                                ? 'bg-purple-50 text-purple-800 border-purple-400'
-                                : normalizedStatus === 'TERMINATED' || normalizedStatus === 'LOST_IN_TRANSIT'
-                                ? 'bg-red-50 text-red-800 border-red-400'
-                                : 'bg-emerald-50 text-emerald-800 border-emerald-400'
-                            }`}
-                          >
-                            <option value="PENDING">PENDING</option>
-                            <option value="CONFIRMED">CONFIRMED</option>
-                            <option value="PACKED">PACKED</option>
-                            <option value="IN_TRANSIT">IN TRANSIT (बाटोमा)</option>
-                            <option value="ARRIVED">ARRIVED (काउन्टरमा पुग्यो)</option>
-                            <option value="DELIVERED">DELIVERED (डेलिभर भयो)</option>
-                            <option value="TERMINATED">🚨 TERMINATED / LOST (रद्द / क्षति)</option>
-                          </select>
-
-                          {payMethod.includes('esewa') && (
-                            <span className="bg-[#60bb46] text-white text-[10px] font-mono font-bold px-2 py-0.5 rounded-xs">
-                              eSewa
-                            </span>
-                          )}
-                          {payMethod.includes('khalti') && (
-                            <span className="bg-[#5c2d91] text-white text-[10px] font-mono font-bold px-2 py-0.5 rounded-xs">
-                              Khalti
-                            </span>
-                          )}
-                          {payMethod.includes('rbb') && (
-                            <span className="bg-[#1a3a2a] text-white text-[10px] font-mono font-bold px-2 py-0.5 rounded-xs">
-                              RBB Bank
-                            </span>
-                          )}
-
-                          <span className="text-[11px] font-mono text-zinc-400">
-                            {new Date(order.createdAt).toLocaleDateString()}
-                          </span>
+                          <h3 className="hz-display m-0 font-bold text-[22px]">{order.customerName}</h3>
+                          {payMethod.includes('esewa') && <span className="inline-flex items-center px-2.5 py-[3px] rounded-full text-xs font-bold bg-[#D9EEDF] text-[#17553A]">eSewa</span>}
+                          {payMethod.includes('khalti') && <span className="inline-flex items-center px-2.5 py-[3px] rounded-full text-xs font-bold bg-[#E9DDF7] text-[#5c2d91]">Khalti</span>}
+                          {payMethod.includes('rbb') && <span className="inline-flex items-center px-2.5 py-[3px] rounded-full text-xs font-bold bg-[#12301F] text-white">RBB Bank</span>}
+                          <span className="text-[13px] text-[#5E6B62]">{new Date(order.createdAt).toLocaleDateString()}</span>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-zinc-600">
-                          <p className="flex items-center gap-2">
-                            <Phone size={13} className="text-amber-600 shrink-0" />
-                            <span className="font-mono font-bold text-zinc-900">{order.phone}</span>
-                          </p>
-                          <p className="flex items-center gap-2">
-                            <MapPin size={13} className="text-amber-600 shrink-0" />
-                            <span className="font-serif truncate">{order.addressText}</span>
-                          </p>
+                        <div className="bg-[#F5F1E6] rounded-[14px] px-[18px] py-4 flex flex-wrap items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="font-bold text-base">{order.productName}</div>
+                            <div className="mt-0.5 text-sm text-[#5E6B62]">{order.quantity} {T('units', 'वटा')}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-xs font-semibold tracking-[0.06em] uppercase text-[#5E6B62]">{T('Total', 'कुल')}</div>
+                            <div className="hz-display font-bold text-2xl text-[#9A3F10]">{money(order.totalPrice)}</div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-xs font-semibold tracking-[0.06em] uppercase text-[#5E6B62] mb-2">{T('Order status', 'अर्डर स्थिति')}</div>
+                          <div role="group" aria-label="Order status" className="flex flex-wrap gap-2">
+                            {orderSteps.map((st, i) => {
+                              const state = isTerminated ? 'future' : i === curIdx ? 'current' : i < curIdx ? 'done' : 'future';
+                              return (
+                                <button
+                                  key={st.key}
+                                  type="button"
+                                  disabled={busy}
+                                  aria-pressed={state === 'current'}
+                                  onClick={() => handleStatusChange(orderId, st.key)}
+                                  className={stepClass(state)}
+                                >
+                                  {st.label}
+                                </button>
+                              );
+                            })}
+                            <button
+                              type="button"
+                              disabled={busy}
+                              aria-pressed={isTerminated}
+                              onClick={() => handleStatusChange(orderId, 'TERMINATED')}
+                              className={`inline-flex items-center gap-1.5 min-h-[40px] box-border px-4 rounded-full text-[13px] font-bold border transition cursor-pointer disabled:opacity-60 ${
+                                isTerminated ? 'border-[#B0301B] bg-[#B0301B] text-white' : 'border-[#E7B9AE] bg-[#FFF1EE] text-[#B0301B] hover:brightness-95'
+                              }`}
+                            >
+                              {T('Cancel / lost', 'रद्द / क्षति')}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid gap-3.5 text-sm" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))' }}>
+                          <div className="flex items-start gap-2.5">
+                            <Phone size={18} className="shrink-0 mt-0.5 text-[#9A3F10]" strokeWidth={1.8} />
+                            <div><div className="text-xs text-[#5E6B62]">{T('Buyer phone', 'खरिदकर्ता फोन')}</div><div className="font-semibold">{order.phone}</div></div>
+                          </div>
+                          <div className="flex items-start gap-2.5">
+                            <MapPin size={18} className="shrink-0 mt-0.5 text-[#9A3F10]" strokeWidth={1.8} />
+                            <div className="min-w-0"><div className="text-xs text-[#5E6B62]">{T('Deliver to', 'डेलिभरी ठेगाना')}</div><div className="font-semibold break-words">{order.addressText}</div></div>
+                          </div>
+                          <div className="flex items-start gap-2.5">
+                            <Banknote size={18} className="shrink-0 mt-0.5 text-[#9A3F10]" strokeWidth={1.8} />
+                            <div className="min-w-0">
+                              <div className="text-xs text-[#5E6B62]">Txn / UTR</div>
+                              <div className="font-semibold font-mono break-all">{order.paymentDetails?.transactionId || '—'}</div>
+                              {order.paymentDetails?.receiptScreenshotUrl && (
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewReceipt(order.paymentDetails.receiptScreenshotUrl!)}
+                                  className="mt-1.5 inline-flex items-center gap-1 text-xs font-bold text-[#1D4A38] hover:underline cursor-pointer bg-transparent border-0 p-0"
+                                >
+                                  <Eye size={13} />
+                                  {T('View receipt', 'रसिद हेर्नुहोस्')}
+                                </button>
+                              )}
+                            </div>
+                          </div>
                         </div>
 
                         {order.busNumber && (
-                          <div className="p-2.5 bg-amber-50 border border-amber-200 text-xs text-zinc-800 flex flex-wrap items-center gap-3 rounded-xs">
-                            <span className="font-bold flex items-center gap-1 text-amber-900">
-                              <Bus size={13} className="text-amber-600" />
-                              <span>बस: {order.busNumber}</span>
+                          <div className="bg-[#FFF6DC] border border-[#EBCB78] rounded-[14px] px-[18px] py-3.5 text-sm flex flex-wrap items-center gap-x-5 gap-y-2">
+                            <span className="font-bold flex items-center gap-1.5 text-[#7A4A00]">
+                              <Bus size={16} /> {T('Bus', 'बस')}: {order.busNumber}
                             </span>
-                            {order.driverPhone && (
-                              <span className="text-zinc-600 font-mono">
-                                चालक: <strong className="text-zinc-900">{order.driverPhone}</strong>
-                              </span>
-                            )}
-                            {order.biltyNumber && (
-                              <span className="text-zinc-600 font-mono">
-                                बिल्टी: <code className="text-amber-800 font-bold">{order.biltyNumber}</code>
-                              </span>
-                            )}
-                            {order.estimatedArrival && (
-                              <span className="text-[11px] text-zinc-700 font-medium">
-                                ⏰ {order.estimatedArrival}
-                              </span>
-                            )}
+                            {order.driverPhone && <span className="text-[#5E6B62]">{T('Driver', 'चालक')}: <strong className="text-[#1A2A21]">{order.driverPhone}</strong></span>}
+                            {order.biltyNumber && <span className="text-[#5E6B62]">{T('Bilty', 'बिल्टी')}: <strong className="text-[#9A3F10]">{order.biltyNumber}</strong></span>}
+                            {order.estimatedArrival && <span className="text-[#5E6B62]">⏰ {order.estimatedArrival}</span>}
                           </div>
                         )}
-
-                        <div className="p-3 bg-zinc-50 border border-zinc-200 text-xs flex flex-wrap items-center justify-between gap-2 rounded-xs">
-                          <div>
-                            <span className="text-zinc-500">{adminLang === 'ne' ? 'उत्पादन: ' : 'Product: '}</span>
-                            <span className="font-serif font-bold text-zinc-900">{order.productName}</span>
-                            <span className="text-zinc-400"> | </span>
-                            <span className="text-zinc-500">{adminLang === 'ne' ? 'संख्या: ' : 'Qty: '}</span>
-                            <span className="font-mono font-bold text-zinc-900">{order.quantity} units</span>
-                          </div>
-                          <div>
-                            <span className="text-zinc-500">{adminLang === 'ne' ? 'कुल रकम: ' : 'Total: '}</span>
-                            <span className="font-mono font-bold text-amber-600 text-sm">Rs. {order.totalPrice}</span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-3 text-xs">
-                          <div>
-                            <span className="text-zinc-500 font-mono">Txn / UTR: </span>
-                            <code className="bg-zinc-100 text-zinc-900 font-mono font-bold px-2 py-0.5 border border-zinc-300 rounded-xs">
-                              {order.paymentDetails?.transactionId}
-                            </code>
-                          </div>
-
-                          {order.paymentDetails?.receiptScreenshotUrl && (
-                            <button
-                              type="button"
-                              onClick={() => setPreviewReceipt(order.paymentDetails.receiptScreenshotUrl!)}
-                              className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-zinc-800 hover:text-amber-600 bg-white px-2 py-1 border border-zinc-300 transition cursor-pointer rounded-xs"
-                            >
-                              <Eye size={12} />
-                              <span>{adminLang === 'ne' ? 'रसिद हेर्नुहोस्' : 'View Receipt'}</span>
-                            </button>
-                          )}
-                        </div>
                       </div>
 
-                      <div className="lg:col-span-5 flex flex-col gap-2.5 bg-zinc-50 p-4 border border-zinc-200 rounded-xs">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenDispatchModal(order)}
-                          className="w-full flex items-center justify-center gap-2 bg-amber-400 hover:bg-amber-300 text-zinc-950 font-black text-xs uppercase tracking-wider py-2.5 shadow-sm transition cursor-pointer rounded-xs"
-                        >
-                          <Bus size={14} />
-                          <span>{adminLang === 'ne' ? '🚌 डिलक्स बस ट्र्याकिङ अपडेट' : '🚌 Update Bus & Dispatch'}</span>
-                        </button>
-
-                        <a
-                          href={mapLink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="w-full flex items-center justify-center gap-2 bg-[#1a3a2a] hover:bg-[#12271c] text-white font-mono text-xs py-2 shadow-sm transition rounded-xs"
-                        >
-                          <MapPin size={13} className="text-amber-400" />
-                          <span>{adminLang === 'ne' ? 'Google Map मा हेर्नुहोस्' : 'Open in Google Maps'}</span>
-                          <ExternalLink size={12} />
-                        </a>
-
-                        <div className="grid grid-cols-2 gap-2 pt-1">
-                          <a
-                            href={`tel:${order.phone}`}
-                            className="flex items-center justify-center gap-1.5 bg-white border border-zinc-300 hover:bg-zinc-100 text-zinc-900 font-mono text-xs py-2 transition rounded-xs"
-                          >
-                            <Phone size={13} className="text-amber-600" />
-                            <span>{adminLang === 'ne' ? 'फोन गर्नुहोस्' : 'Call Customer'}</span>
-                          </a>
-
-                          <a
-                            href={whatsappUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center justify-center gap-1.5 bg-[#25D366] hover:bg-[#20ba59] text-white font-extrabold text-xs py-2 transition shadow-xs rounded-xs"
-                          >
-                            <MessageSquare size={13} />
-                            <span>WhatsApp Alert</span>
-                          </a>
-                        </div>
-                      </div>
-
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          )}
-
-          {/* Tab 2: FARMER MARKETPLACE / SALES SUBMISSIONS */}
-          {activeTab === 'farmer_sales' && (
-            <div className="space-y-4 text-left">
-              <div className="p-4 bg-emerald-50/70 border border-emerald-300 rounded-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-sm font-bold text-emerald-950 uppercase tracking-wide">
-                    🌾 Farmer Marketplace Inquiries & Direct Sell Requests
-                  </h3>
-                  <p className="text-xs text-emerald-800 mt-0.5">
-                    Local farmers and customers who submitted their ducklings, eggs, and farm produce for sale.
-                  </p>
-                </div>
-                <span className="text-xs font-mono font-bold bg-[#1a3a2a] text-amber-300 px-3 py-1 rounded-xs">
-                  Total Listings: {farmerListings.length}
-                </span>
-              </div>
-
-              {farmerListings.length === 0 ? (
-                <div className="bg-white border border-zinc-200 p-12 text-center text-zinc-500 rounded-xs">
-                  No farmer produce listings recorded yet.
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {farmerListings
-                    .filter((item) => 
-                      (item.sellerName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      (item.phone || '').includes(searchQuery) ||
-                      (item.productName || '').toLowerCase().includes(searchQuery.toLowerCase())
-                    )
-                    .map((listing) => (
-                      <div
-                        key={listing.id}
-                        className="bg-white border border-zinc-200 rounded-xs shadow-xs p-5 grid grid-cols-1 lg:grid-cols-12 gap-5 items-center hover:border-emerald-600/60 transition"
-                      >
-                        <div className="lg:col-span-2 flex justify-center">
-                          {listing.imagePreview ? (
-                            <img
-                              src={listing.imagePreview}
-                              alt="Produce"
-                              className="w-24 h-24 object-cover rounded-xs border border-zinc-300"
+                      {/* RIGHT: map + actions */}
+                      <div className="flex-[0_1_380px] min-w-[280px] box-border bg-[#EFE9D8] p-5 flex flex-col gap-3.5">
+                        <div className="relative h-[170px] rounded-[14px] overflow-hidden bg-[#DDE8D6] flex items-center justify-center">
+                          {mapEmbed ? (
+                            <iframe
+                              title={`Delivery location ${orderId}`}
+                              src={mapEmbed}
+                              loading="lazy"
+                              referrerPolicy="no-referrer-when-downgrade"
+                              className="absolute inset-0 w-full h-full border-0"
                             />
                           ) : (
-                            <div className="w-24 h-24 bg-zinc-100 border border-dashed border-zinc-300 rounded-xs flex flex-col items-center justify-center text-zinc-400 text-[10px] font-mono">
-                              <span>🌾</span>
-                              <span>No Photo</span>
+                            <div className="text-center text-[13px] text-[#5E6B62] px-4">
+                              <MapPin size={28} className="mx-auto mb-1 text-[#B4411E]" />
+                              {T('No GPS pin saved for this order', 'यो अर्डरमा GPS पिन छैन')}
+                            </div>
+                          )}
+                          {hasCoords && (
+                            <div className="absolute left-2.5 bottom-2.5 bg-white/90 rounded-lg px-2.5 py-1 text-xs font-semibold font-mono">
+                              {order.location.latitude.toFixed(6)}, {order.location.longitude.toFixed(6)}
                             </div>
                           )}
                         </div>
 
-                        <div className="lg:col-span-6 space-y-1.5">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold font-mono text-zinc-500">{listing.id}</span>
-                            <span className="text-xs font-mono font-bold bg-zinc-100 text-zinc-700 px-2 py-0.5 rounded-xs border border-zinc-300">
-                              {listing.category || 'Duck Produce'}
-                            </span>
-                            <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
-                              listing.status === 'Approved' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                            }`}>
-                              {listing.status || 'Pending'}
-                            </span>
-                          </div>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenDispatchModal(order)}
+                          className="flex items-center justify-center gap-2.5 h-12 border-0 rounded-xl bg-[#F4B63B] text-[#2A1B00] font-bold text-sm tracking-[0.02em] cursor-pointer hover:brightness-95 transition"
+                        >
+                          <Bus size={20} strokeWidth={1.8} />
+                          {T('Update bus and dispatch', 'बस र डिस्प्याच अपडेट')}
+                        </button>
 
-                          <h4 className="text-base font-bold text-zinc-950">{listing.productName}</h4>
-
-                          <div className="grid grid-cols-2 gap-2 text-xs font-medium text-zinc-700 pt-1">
-                            <p><strong className="text-zinc-900">Seller:</strong> {listing.sellerName}</p>
-                            <p><strong className="text-zinc-900">Phone:</strong> <span className="font-mono font-bold">{listing.phone}</span></p>
-                            <p><strong className="text-zinc-900">Location:</strong> {listing.location}</p>
-                            <p><strong className="text-zinc-900">Age/Weight:</strong> {listing.ageOrWeight || 'N/A'}</p>
-                            <p><strong className="text-zinc-900">Quantity:</strong> <span className="font-bold text-emerald-800">{listing.quantity}</span></p>
-                            <p><strong className="text-zinc-900">Asking Rate:</strong> <span className="font-mono font-black text-amber-600">Rs. {listing.rate}</span></p>
-                          </div>
-
-                          {listing.description && (
-                            <p className="text-xs text-zinc-600 bg-zinc-50 p-2 border border-zinc-200 rounded-xs mt-1">
-                              <strong>Note:</strong> {listing.description}
-                            </p>
-                          )}
-                        </div>
-
-                        <div className="lg:col-span-4 flex flex-col gap-2">
-                          <a
-                            href={`tel:+977${listing.phone}`}
-                            className="w-full py-2.5 bg-amber-400 hover:bg-amber-300 text-zinc-950 font-black text-xs uppercase tracking-wider rounded-xs flex items-center justify-center gap-2 transition shadow-xs"
-                          >
-                            <Phone size={14} />
-                            <span>Call Seller ({listing.phone})</span>
+                        <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(96px,1fr))' }}>
+                          <a href={mapLink} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-1.5 h-11 rounded-[10px] bg-[#12301F] text-white font-semibold text-[13px] hover:brightness-110 transition">
+                            <ExternalLink size={16} strokeWidth={1.8} />
+                            {T('Maps', 'नक्सा')}
                           </a>
-
-                          <a
-                            href={`https://wa.me/977${listing.phone}?text=${encodeURIComponent(
-                              `नमस्ते ${listing.sellerName} जी, हजारीदेवी डक फार्मबाट सम्पर्क गर्दैछौं। तपाईंको उत्पादन (${listing.productName}) बारे थप बुझ्न खोजेका हौं।`
-                            )}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="w-full py-2.5 bg-[#25D366] hover:bg-[#20ba59] text-white font-extrabold text-xs uppercase tracking-wider rounded-xs flex items-center justify-center gap-2 transition shadow-xs"
-                          >
-                            <MessageSquare size={14} />
-                            <span>WhatsApp Seller</span>
+                          <a href={`tel:${order.phone}`} className="flex items-center justify-center gap-1.5 h-11 rounded-[10px] bg-white border border-[#DDD5BF] text-[#1A2A21] font-semibold text-[13px] hover:brightness-95 transition">
+                            <Phone size={16} strokeWidth={1.8} />
+                            {T('Call', 'फोन')}
                           </a>
-
-                          <div className="flex items-center gap-2 pt-1">
-                            <button
-                              type="button"
-                              onClick={() => toggleListingStatus(listing.id)}
-                              className="flex-1 py-1.5 border border-zinc-300 hover:bg-zinc-100 text-zinc-800 text-xs font-bold rounded-xs transition cursor-pointer flex items-center justify-center gap-1"
-                            >
-                              <Check size={13} className="text-emerald-600" />
-                              <span>{listing.status === 'Approved' ? 'Mark Pending' : 'Approve'}</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => deleteFarmerListing(listing.id)}
-                              className="p-2 border border-zinc-300 hover:bg-red-50 text-red-600 rounded-xs transition cursor-pointer"
-                              title="Delete Listing"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
+                          <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-1.5 h-11 rounded-[10px] bg-[#1E8E4A] text-white font-semibold text-[13px] hover:brightness-110 transition">
+                            <MessageSquare size={16} strokeWidth={1.8} />
+                            WhatsApp
+                          </a>
                         </div>
-
                       </div>
-                    ))}
-                </div>
+                    </article>
+                  );
+                })
               )}
-            </div>
+            </section>
+          )}
+
+          {/* Tab 2: FARMER MARKETPLACE / SALES SUBMISSIONS */}
+          {activeTab === 'farmer_sales' && (
+            <section aria-label="Farmer marketplace" className="flex flex-col gap-[18px]">
+              <div className="bg-[#E3EFE6] border border-[#BFD9C8] rounded-2xl px-5 py-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="text-sm text-[#17553A] max-w-[640px]">
+                  {T('Inquiries and direct-sell requests. Approve a listing to show it on the public marketplace.', 'सोधपुछ र प्रत्यक्ष बिक्री अनुरोध। स्वीकृत गरेपछि सार्वजनिक बजारमा देखिन्छ।')}
+                </div>
+                <span className="inline-flex px-3.5 py-1.5 rounded-full bg-[#12301F] text-white font-bold text-[13px]">
+                  {farmerListings.length} {farmerListings.length === 1 ? T('listing', 'सूची') : T('listings', 'सूचीहरू')}
+                </span>
+              </div>
+
+              {(() => {
+                const sq = searchQuery.toLowerCase();
+                const shown = farmerListings.filter((item) =>
+                  (item.sellerName || '').toLowerCase().includes(sq) ||
+                  (item.phone || '').includes(searchQuery) ||
+                  (item.productName || '').toLowerCase().includes(sq)
+                );
+                if (shown.length === 0) {
+                  return (
+                    <div className="bg-white border border-dashed border-[#CFC6AD] rounded-[18px] py-12 px-6 text-center text-[#5E6B62]">
+                      {T('No farmer listings to show.', 'देखाउन कुनै किसान सूची छैन।')}
+                    </div>
+                  );
+                }
+                return shown.map((listing) => {
+                  const approved = listing.status === 'Approved';
+                  return (
+                    <article key={listing.id} className="bg-white border border-[#E4DDCB] rounded-[18px] p-[22px] flex flex-wrap gap-[22px]">
+                      {listing.imagePreview ? (
+                        <img src={listing.imagePreview} alt="Produce" className="shrink-0 w-[120px] h-[120px] object-cover rounded-[14px] border border-[#E4DDCB]" />
+                      ) : (
+                        <div className="shrink-0 w-[120px] h-[120px] rounded-[14px] bg-[#F0EAD8] border border-dashed border-[#CFC6AD] flex flex-col items-center justify-center gap-1.5 text-[#5E6B62] text-xs">
+                          <ImageIcon size={26} strokeWidth={1.6} />
+                          {T('No photo', 'फोटो छैन')}
+                        </div>
+                      )}
+
+                      <div className="flex-[1_1_360px] min-w-0 flex flex-col gap-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs font-bold text-[#5E6B62] tracking-wide">{listing.id}</span>
+                          <span className="inline-flex px-2.5 py-[3px] rounded-lg bg-[#F0EAD8] text-[13px] font-semibold">{listing.category || 'Duck Produce'}</span>
+                          <span className={`inline-flex px-2.5 py-[3px] rounded-full text-xs font-bold ${approved ? 'bg-[#D9EEDF] text-[#17553A]' : 'bg-[#FCE9BE] text-[#7A4A00]'}`}>
+                            {approved ? T('Approved', 'स्वीकृत') : T('Pending', 'पेन्डिङ')}
+                          </span>
+                        </div>
+                        <h3 className="hz-display m-0 font-bold text-[22px]">{listing.productName}</h3>
+                        <div className="grid gap-x-5 gap-y-3 text-sm" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))' }}>
+                          <div><div className="text-xs text-[#5E6B62]">{T('Seller', 'विक्रेता')}</div><div className="font-semibold">{listing.sellerName}</div></div>
+                          <div><div className="text-xs text-[#5E6B62]">{T('Phone', 'फोन')}</div><div className="font-semibold">{listing.phone}</div></div>
+                          <div><div className="text-xs text-[#5E6B62]">{T('Location', 'स्थान')}</div><div className="font-semibold">{listing.location}</div></div>
+                          <div><div className="text-xs text-[#5E6B62]">{T('Age / weight', 'उमेर / तौल')}</div><div className="font-semibold">{listing.ageOrWeight || 'N/A'}</div></div>
+                          <div><div className="text-xs text-[#5E6B62]">{T('Quantity', 'संख्या')}</div><div className="font-bold text-[#17553A]">{listing.quantity}</div></div>
+                          <div><div className="text-xs text-[#5E6B62]">{T('Asking rate', 'माग मूल्य')}</div><div className="font-bold text-[#9A3F10]">Rs. {listing.rate}</div></div>
+                        </div>
+                        {listing.description && (
+                          <div className="bg-[#F5F1E6] rounded-xl px-3.5 py-2.5 text-sm"><span className="font-bold">{T('Note', 'टिप्पणी')}: </span>{listing.description}</div>
+                        )}
+                      </div>
+
+                      <div className="flex-[0_1_270px] min-w-[220px] flex flex-col gap-2 justify-center">
+                        <a href={`tel:+977${listing.phone}`} className="flex items-center justify-center gap-2 h-[46px] rounded-xl bg-[#F4B63B] text-[#2A1B00] font-bold text-sm hover:brightness-95 transition">
+                          <Phone size={18} strokeWidth={1.8} />
+                          {T('Call seller', 'विक्रेतालाई फोन')}
+                        </a>
+                        <a
+                          href={`https://wa.me/977${listing.phone}?text=${encodeURIComponent(
+                            `नमस्ते ${listing.sellerName} जी, हजारीदेवी डक फार्मबाट सम्पर्क गर्दैछौं। तपाईंको उत्पादन (${listing.productName}) बारे थप बुझ्न खोजेका हौं।`
+                          )}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center justify-center gap-2 h-[46px] rounded-xl bg-[#1E8E4A] text-white font-bold text-sm hover:brightness-110 transition"
+                        >
+                          <MessageSquare size={18} strokeWidth={1.8} />
+                          {T('WhatsApp seller', 'WhatsApp गर्नुहोस्')}
+                        </a>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => toggleListingStatus(listing.id)}
+                            className={`flex-1 h-11 rounded-xl text-sm cursor-pointer transition ${
+                              approved ? 'border border-[#DDD5BF] bg-white text-[#1A2A21] font-semibold' : 'border-0 bg-[#1D4A38] text-white font-bold'
+                            }`}
+                          >
+                            {approved ? T('Mark pending', 'पेन्डिङ बनाउनुहोस्') : T('Approve', 'स्वीकृत गर्नुहोस्')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteFarmerListing(listing.id)}
+                            aria-label="Delete listing"
+                            className="shrink-0 w-11 h-11 rounded-xl border border-[#E7B9AE] bg-[#FFF1EE] text-[#B0301B] flex items-center justify-center cursor-pointer hover:brightness-95 transition"
+                          >
+                            <Trash2 size={18} strokeWidth={1.8} />
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  );
+                });
+              })()}
+            </section>
           )}
 
           {/* Tab 3: ORDER HISTORY */}
           {activeTab === 'history' && (
-            <div className="space-y-4">
+            <section aria-label="Order history" className="flex flex-col gap-[18px]">
               {displayedHistoryOrders.length > 0 && (
-                <div className="flex justify-end">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="text-sm text-[#5E6B62]">
+                    {displayedHistoryOrders.length} {T('completed orders', 'सम्पन्न अर्डर')}
+                  </div>
                   <button
                     type="button"
                     onClick={handleClearAllHistory}
-                    className="inline-flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white font-mono font-bold text-xs uppercase px-3 py-2 rounded-xs shadow transition cursor-pointer"
+                    className="inline-flex items-center gap-2 h-11 px-4 rounded-xl border border-[#E7B9AE] bg-[#FFF1EE] text-[#B0301B] font-semibold text-sm cursor-pointer hover:brightness-95 transition"
                   >
-                    <Trash2 size={13} />
-                    <span>{adminLang === 'ne' ? 'सबै इतिहास मेटाउनुहोस्' : 'Clear All History'}</span>
+                    <Trash2 size={16} strokeWidth={1.8} />
+                    {T('Clear all history', 'सबै इतिहास मेटाउनुहोस्')}
                   </button>
                 </div>
               )}
 
               {displayedHistoryOrders.length === 0 ? (
-                <div className="bg-white p-12 text-center border border-zinc-200 shadow-sm space-y-2 rounded-xs">
-                  <History size={38} className="mx-auto text-zinc-300" />
-                  <p className="font-serif font-bold text-zinc-800 text-base">
-                    {adminLang === 'ne' ? 'कुनै पनि सम्पन्न अर्डर इतिहास छैन' : 'No completed orders in history yet'}
-                  </p>
+                <div className="bg-white border border-dashed border-[#CFC6AD] rounded-[18px] py-[72px] px-6 flex flex-col items-center gap-3.5 text-center">
+                  <div className="w-16 h-16 rounded-[20px] bg-[#F0EAD8] text-[#5E6B62] flex items-center justify-center">
+                    <History size={30} strokeWidth={1.6} />
+                  </div>
+                  <div className="hz-display font-bold text-[22px]">{T('No completed orders yet', 'कुनै सम्पन्न अर्डर छैन')}</div>
+                  <div className="text-[#5E6B62] max-w-[380px]">{T('Orders you mark as delivered move here, so the active list stays short.', 'डेलिभर भएको चिनो लगाएका अर्डर यहाँ सर्छन्, सक्रिय सूची छोटो रहन्छ।')}</div>
                 </div>
               ) : (
-                <div className="bg-white border border-zinc-200 overflow-hidden shadow-sm rounded-xs">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead>
-                        <tr className="bg-[#1a3a2a] text-white font-mono uppercase tracking-wider text-[11px] border-b border-emerald-900">
-                          <th className="p-3.5">Customer & Phone</th>
-                          <th className="p-3.5">Product & Units</th>
-                          <th className="p-3.5">Amount & Payment</th>
-                          <th className="p-3.5">Delivery & Bus Info</th>
-                          <th className="p-3.5">Completed Status</th>
-                          <th className="p-3.5 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-zinc-200 font-serif">
-                        {displayedHistoryOrders.map((order) => {
-                          const orderId = (order.id || order._id) as string;
-                          const whatsappUrl = generateWhatsAppUrl(order);
-                          const st = (order.status || '').toUpperCase();
-                          const isTerminated = st === 'TERMINATED' || st === 'LOST_IN_TRANSIT';
+                displayedHistoryOrders.map((order) => {
+                  const orderId = (order.id || order._id) as string;
+                  const whatsappUrl = generateWhatsAppUrl(order);
+                  const st = (order.status || '').toUpperCase();
+                  const isTerminated = st === 'TERMINATED' || st === 'LOST_IN_TRANSIT';
 
-                          return (
-                            <tr key={orderId} className="hover:bg-zinc-50 transition">
-                              <td className="p-3.5">
-                                <p className="font-bold text-zinc-900 text-sm leading-tight">{order.customerName}</p>
-                                <p className="text-zinc-600 font-mono text-xs flex items-center gap-1 mt-0.5">
-                                  <Phone size={11} className="text-amber-600" />
-                                  <span>{order.phone}</span>
-                                </p>
-                                <p className="text-[11px] text-zinc-500 mt-0.5 truncate max-w-[180px]">
-                                  {order.addressText}
-                                </p>
-                              </td>
+                  return (
+                    <article key={orderId} className="bg-white border border-[#E4DDCB] rounded-[18px] p-[22px] flex flex-wrap items-center gap-x-6 gap-y-4">
+                      <div className="flex-[1_1_260px] min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="hz-display m-0 font-bold text-xl">{order.customerName}</h3>
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-[3px] rounded-full text-xs font-bold ${
+                            isTerminated ? 'bg-[#FFF1EE] text-[#B0301B]' : st === 'DELIVERED' ? 'bg-[#D9EEDF] text-[#17553A]' : 'bg-[#EFE9D8] text-[#5E6B62]'
+                          }`}>
+                            {isTerminated ? <AlertTriangle size={12} /> : <CheckCircle2 size={12} />}
+                            {st}
+                          </span>
+                          <span className="text-[13px] text-[#5E6B62]">{new Date(order.createdAt).toLocaleDateString()}</span>
+                        </div>
+                        <div className="mt-1.5 text-sm text-[#5E6B62]">{order.phone} · {order.addressText}</div>
+                      </div>
 
-                              <td className="p-3.5">
-                                <p className="font-bold text-zinc-900">{order.productName}</p>
-                                <p className="font-mono text-zinc-600">{order.quantity} units</p>
-                                <p className="text-[10px] font-mono text-zinc-400">{new Date(order.createdAt).toLocaleDateString()}</p>
-                              </td>
+                      <div className="flex-[1_1_220px] min-w-0 text-sm">
+                        <div className="font-bold">{order.productName}</div>
+                        <div className="text-[#5E6B62]">{order.quantity} {T('units', 'वटा')}</div>
+                        {(order.busNumber || order.biltyNumber) && (
+                          <div className="mt-1 text-xs text-[#5E6B62] flex items-center gap-1.5">
+                            <Bus size={13} className="text-[#9A3F10]" />
+                            {order.busNumber}{order.biltyNumber ? ` · ${T('Bilty', 'बिल्टी')} ${order.biltyNumber}` : ''}
+                          </div>
+                        )}
+                      </div>
 
-                              <td className="p-3.5">
-                                <p className="font-mono font-bold text-zinc-900 text-sm">Rs. {order.totalPrice}</p>
-                                <div className="flex items-center gap-1.5 mt-1">
-                                  <span className="uppercase text-[10px] font-mono font-bold px-1.5 py-0.5 bg-zinc-100 text-zinc-800 border border-zinc-300 rounded-xs">
-                                    {order.paymentMethod || 'eSewa'}
-                                  </span>
-                                  <code className="text-[10px] font-mono bg-zinc-50 px-1 py-0.5 border border-zinc-200 text-zinc-600 rounded-xs">
-                                    {order.paymentDetails?.transactionId}
-                                  </code>
-                                </div>
-                              </td>
+                      <div className="flex-[0_1_170px] text-right">
+                        <div className="hz-display font-bold text-[22px] text-[#9A3F10]">{money(order.totalPrice)}</div>
+                        <div className="text-xs text-[#5E6B62] font-mono break-all">
+                          {(order.paymentMethod || 'eSewa')} · {order.paymentDetails?.transactionId}
+                        </div>
+                      </div>
 
-                              <td className="p-3.5 text-zinc-600">
-                                <p className="flex items-center gap-1 font-mono font-bold text-zinc-900">
-                                  <Bus size={12} className="text-amber-600" />
-                                  <span>{order.busNumber || 'Delivered'}</span>
-                                </p>
-                                {order.biltyNumber && (
-                                  <p className="text-[11px] font-mono text-zinc-600">
-                                    Bilty: <code className="font-bold text-zinc-900">{order.biltyNumber}</code>
-                                  </p>
-                                )}
-                                {order.counterName && (
-                                  <p className="text-[11px] font-serif text-zinc-500 truncate max-w-[150px]">
-                                    {order.counterName}
-                                  </p>
-                                )}
-                              </td>
-
-                              <td className="p-3.5">
-                                <span className={`inline-flex items-center gap-1 text-[11px] font-mono font-bold px-2 py-0.5 border rounded-xs ${
-                                  isTerminated
-                                    ? 'bg-red-50 text-red-800 border-red-300'
-                                    : st === 'DELIVERED'
-                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                                    : 'bg-zinc-100 text-zinc-800 border-zinc-300'
-                                }`}>
-                                  {isTerminated ? <AlertTriangle size={11} className="text-red-600" /> : <CheckCircle2 size={11} />}
-                                  <span>{st}</span>
-                                </span>
-                              </td>
-
-                              <td className="p-3.5 text-right">
-                                <div className="flex items-center justify-end gap-1.5">
-                                  {order.paymentDetails?.receiptScreenshotUrl && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setPreviewReceipt(order.paymentDetails.receiptScreenshotUrl!)}
-                                      className="p-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 border border-zinc-300 transition rounded-xs"
-                                      title="View Receipt"
-                                    >
-                                      <Eye size={13} />
-                                    </button>
-                                  )}
-
-                                  <a
-                                    href={whatsappUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="p-1.5 bg-[#25D366] hover:bg-[#20ba59] text-white transition shadow-xs rounded-xs"
-                                    title="WhatsApp Message"
-                                  >
-                                    <MessageSquare size={13} />
-                                  </a>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => handleStatusChange(orderId, 'in_transit')}
-                                    className="px-2 py-1 text-[11px] font-mono font-bold text-amber-800 hover:bg-amber-100 border border-amber-300 bg-amber-50 rounded-xs transition cursor-pointer"
-                                    title="Move back to Active"
-                                  >
-                                    Reopen
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteOrder(orderId)}
-                                    className="p-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-300 transition rounded-xs cursor-pointer"
-                                    title={adminLang === 'ne' ? 'अर्डर मेटाउनुहोस्' : 'Delete Order'}
-                                  >
-                                    <Trash2 size={13} />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {order.paymentDetails?.receiptScreenshotUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setPreviewReceipt(order.paymentDetails.receiptScreenshotUrl!)}
+                            aria-label="View receipt"
+                            className="w-11 h-11 rounded-xl border border-[#DDD5BF] bg-white text-[#1A2A21] flex items-center justify-center cursor-pointer hover:brightness-95 transition"
+                          >
+                            <Eye size={18} strokeWidth={1.8} />
+                          </button>
+                        )}
+                        <a
+                          href={whatsappUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label="WhatsApp"
+                          className="w-11 h-11 rounded-xl bg-[#1E8E4A] text-white flex items-center justify-center hover:brightness-110 transition"
+                        >
+                          <MessageSquare size={18} strokeWidth={1.8} />
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => handleStatusChange(orderId, 'in_transit')}
+                          className="h-11 px-4 rounded-xl border border-[#DDD5BF] bg-white text-[#1A2A21] font-semibold text-sm cursor-pointer hover:brightness-95 transition"
+                        >
+                          {T('Reopen', 'फेरि खोल्नुहोस्')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteOrder(orderId)}
+                          aria-label={T('Delete order', 'अर्डर मेटाउनुहोस्')}
+                          className="w-11 h-11 rounded-xl border border-[#E7B9AE] bg-[#FFF1EE] text-[#B0301B] flex items-center justify-center cursor-pointer hover:brightness-95 transition"
+                        >
+                          <Trash2 size={18} strokeWidth={1.8} />
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })
               )}
-            </div>
+            </section>
           )}
 
           {/* Tab 4: Farm Visits with Status Selector & Confirmation */}
           {activeTab === 'visits' && (
-            <div className="space-y-4 text-left">
-              {visits.length === 0 ? (
-                <div className="bg-white p-12 text-center border border-zinc-200 shadow-sm space-y-2 rounded-xs">
-                  <Calendar size={38} className="mx-auto text-zinc-300" />
-                  <p className="font-serif font-bold text-zinc-800 text-base">
-                    {adminLang === 'ne' ? 'कुनै पनि फार्म भिजिट अनुरोध छैन' : 'No farm visit requests found'}
-                  </p>
-                </div>
-              ) : (
-                visits.map((visit) => {
+            <section aria-label="Farm visits" className="flex flex-col gap-[18px]">
+              {(() => {
+                const vq = searchQuery.toLowerCase();
+                const shownVisits = visits.filter((v) =>
+                  (v.fullName || '').toLowerCase().includes(vq) || String(v.phone || '').includes(searchQuery)
+                );
+                if (shownVisits.length === 0) {
+                  return (
+                    <div className="bg-white border border-dashed border-[#CFC6AD] rounded-[18px] py-[72px] px-6 flex flex-col items-center gap-3.5 text-center">
+                      <div className="w-16 h-16 rounded-[20px] bg-[#F0EAD8] text-[#5E6B62] flex items-center justify-center">
+                        <Calendar size={30} strokeWidth={1.6} />
+                      </div>
+                      <div className="hz-display font-bold text-[22px]">{T('No farm visits booked', 'कुनै फार्म भ्रमण बुक छैन')}</div>
+                      <div className="text-[#5E6B62] max-w-[380px]">{T('When a buyer asks to visit the farm, the request and preferred date will show up here.', 'खरिदकर्ताले फार्म भ्रमण माग्दा अनुरोध र मिति यहाँ देखिन्छ।')}</div>
+                    </div>
+                  );
+                }
+                return shownVisits.map((visit) => {
                   const cleanPhone = String(visit.phone || '').replace(/[^0-9]/g, '');
                   const phoneWithCountry = cleanPhone.startsWith('977') ? cleanPhone : `977${cleanPhone}`;
                   const whatsappUrl = `https://wa.me/${phoneWithCountry}?text=${encodeURIComponent(
@@ -1836,8 +1740,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
 
                   const handleSendEmailConfirmation = () => {
                     const userEmail = prompt(
-                      adminLang === 'ne' 
-                        ? `${visit.fullName} को इमेल ठेगाना लेख्नुहोस्:` 
+                      adminLang === 'ne'
+                        ? `${visit.fullName} को इमेल ठेगाना लेख्नुहोस्:`
                         : `Enter email address for ${visit.fullName}:`
                     );
                     if (!userEmail || !userEmail.includes('@')) return;
@@ -1850,26 +1754,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
                   };
 
                   const currentVisitStatus = visit.status || 'Pending';
+                  const isPending = currentVisitStatus.toLowerCase() === 'pending';
 
                   return (
-                    <div
-                      key={visit.id}
-                      className="bg-white border border-zinc-200 shadow-xs p-5 md:p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 rounded-xs hover:border-emerald-700/50 transition"
-                    >
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2.5">
-                          <h4 className="font-serif font-bold text-zinc-900 text-base">{visit.fullName}</h4>
-                          <span className="bg-zinc-100 text-zinc-800 border border-zinc-300 text-[10px] font-mono font-bold px-2 py-0.5 rounded-xs">
-                            {visit.visitorCount} {adminLang === 'ne' ? 'जना' : 'Visitors'}
+                    <article key={visit.id} className="bg-white border border-[#E4DDCB] rounded-[18px] p-[22px] flex flex-wrap items-center gap-x-6 gap-y-4">
+                      <div className="flex-[1_1_320px] min-w-0 flex flex-col gap-2.5">
+                        <div className="flex flex-wrap items-center gap-2.5">
+                          <h3 className="hz-display m-0 font-bold text-xl">{visit.fullName}</h3>
+                          <span className="inline-flex px-2.5 py-[3px] rounded-lg bg-[#F0EAD8] text-[13px] font-semibold">
+                            {visit.visitorCount} {T('visitors', 'जना')}
                           </span>
-
                           <select
                             value={currentVisitStatus}
                             onChange={(e) => handleVisitStatusChange(visit.id, e.target.value)}
-                            className={`text-[11px] font-mono font-bold uppercase px-2 py-1 border outline-none cursor-pointer rounded-xs ${
-                              currentVisitStatus.toLowerCase() === 'pending' 
-                                ? 'bg-amber-50 text-amber-800 border-amber-300' 
-                                : 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                            aria-label="Visit status"
+                            className={`h-9 px-3 rounded-full border text-xs font-bold cursor-pointer ${
+                              isPending ? 'bg-[#FCE9BE] text-[#7A4A00] border-[#EBCB78]' : 'bg-[#D9EEDF] text-[#17553A] border-[#BFD9C8]'
                             }`}
                           >
                             <option value="Pending">Pending</option>
@@ -1877,507 +1777,395 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
                             <option value="Completed">Completed</option>
                           </select>
                         </div>
-
-                        <div className="flex flex-wrap items-center gap-4 text-xs text-zinc-600">
-                          <span className="flex items-center gap-1.5 font-mono font-bold text-zinc-900">
-                            <Phone size={12} className="text-amber-600" />
-                            {visit.phone}
-                          </span>
-                          <span className="flex items-center gap-1.5 font-mono font-bold text-amber-800 bg-amber-50 px-2 py-0.5 border border-amber-200 rounded-xs">
-                            <Calendar size={12} />
-                            {adminLang === 'ne' ? 'भिजिट मिति: ' : 'Visit Date: '}{visit.visitDate}
-                          </span>
+                        <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-sm">
+                          <span className="flex items-center gap-2 font-semibold"><Phone size={16} className="text-[#9A3F10]" strokeWidth={1.8} />{visit.phone}</span>
+                          <span className="flex items-center gap-2 font-semibold"><Calendar size={16} className="text-[#9A3F10]" strokeWidth={1.8} />{T('Visit date', 'भिजिट मिति')}: {visit.visitDate}</span>
                         </div>
-
                         {visit.purpose && (
-                          <p className="text-xs font-serif text-zinc-600 bg-zinc-50 border border-zinc-200 p-2 rounded-xs mt-1">
-                            <strong>{adminLang === 'ne' ? 'उद्देश्य/नोट: ' : 'Purpose/Note: '}</strong>
-                            {visit.purpose}
-                          </p>
+                          <div className="bg-[#F5F1E6] rounded-xl px-3.5 py-2.5 text-sm"><span className="font-bold">{T('Purpose / note', 'उद्देश्य / नोट')}: </span>{visit.purpose}</div>
                         )}
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0 w-full md:w-auto flex-wrap">
-                        <a
-                          href={`tel:${visit.phone}`}
-                          className="inline-flex items-center justify-center gap-1.5 bg-white border border-zinc-300 hover:bg-zinc-100 text-zinc-900 font-mono text-xs px-3.5 py-2 transition rounded-xs"
-                        >
-                          <Phone size={13} className="text-amber-600" />
-                          <span>{adminLang === 'ne' ? 'फोन' : 'Call'}</span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <a href={`tel:${visit.phone}`} className="inline-flex items-center justify-center gap-1.5 h-11 px-4 rounded-xl border border-[#DDD5BF] bg-white text-[#1A2A21] font-semibold text-sm hover:brightness-95 transition">
+                          <Phone size={16} strokeWidth={1.8} />{T('Call', 'फोन')}
                         </a>
-
-                        <a
-                          href={whatsappUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center justify-center gap-1.5 bg-[#25D366] hover:bg-[#20ba59] text-white font-bold text-xs px-3.5 py-2 transition shadow-xs rounded-xs"
-                        >
-                          <MessageSquare size={13} />
-                          <span>WhatsApp Confirm</span>
+                        <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center gap-1.5 h-11 px-4 rounded-xl bg-[#1E8E4A] text-white font-semibold text-sm hover:brightness-110 transition">
+                          <MessageSquare size={16} strokeWidth={1.8} />{T('WhatsApp confirm', 'WhatsApp कन्फर्म')}
                         </a>
-
-                        <button
-                          type="button"
-                          onClick={handleSendEmailConfirmation}
-                          className="inline-flex items-center justify-center gap-1.5 bg-blue-700 hover:bg-blue-600 text-white font-bold text-xs px-3.5 py-2 transition shadow-xs rounded-xs cursor-pointer"
-                        >
-                          <Mail size={13} />
-                          <span>Email Confirm</span>
+                        <button type="button" onClick={handleSendEmailConfirmation} className="inline-flex items-center justify-center gap-1.5 h-11 px-4 rounded-xl border-0 bg-[#1D4A38] text-white font-semibold text-sm cursor-pointer hover:brightness-110 transition">
+                          <Mail size={16} strokeWidth={1.8} />{T('Email confirm', 'इमेल कन्फर्म')}
                         </button>
-
                         <button
                           type="button"
                           onClick={() => handleDeleteVisit(visit.id)}
-                          className="p-2 border border-zinc-300 hover:bg-red-50 text-red-600 rounded-xs transition cursor-pointer"
-                          title="Delete Visit"
+                          aria-label="Delete visit"
+                          className="w-11 h-11 rounded-xl border border-[#E7B9AE] bg-[#FFF1EE] text-[#B0301B] flex items-center justify-center cursor-pointer hover:brightness-95 transition"
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={18} strokeWidth={1.8} />
                         </button>
                       </div>
-                    </div>
+                    </article>
                   );
-                })
-              )}
-            </div>
+                });
+              })()}
+            </section>
           )}
 
           {/* Tab 5: Products Management */}
           {activeTab === 'products' && (
-            <div className="space-y-4 text-left">
-              {products.length === 0 ? (
-                <div className="bg-white p-12 text-center border border-zinc-200 shadow-sm space-y-3 rounded-xs">
-                  <Package size={38} className="mx-auto text-zinc-300" />
-                  <p className="font-serif font-bold text-zinc-800 text-base">
-                    {adminLang === 'ne' ? 'कुनै पनि उत्पादन फेला परेन' : 'No products found'}
-                  </p>
-                  <button
-                    onClick={handleOpenAddModal}
-                    className="bg-amber-400 hover:bg-amber-300 text-zinc-950 font-black text-xs uppercase tracking-wider px-4 py-2.5 transition shadow cursor-pointer rounded-xs"
-                  >
-                    {adminLang === 'ne' ? '+ पहिलो उत्पादन थप्नुहोस्' : '+ Add First Product'}
-                  </button>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                  {products.map((p) => (
-                    <div
-                      key={p.id}
-                      className="bg-white border border-zinc-200 overflow-hidden shadow-xs hover:shadow-md transition flex flex-col justify-between rounded-xs"
-                    >
-                      <div>
-                        <div className="h-52 w-full overflow-hidden bg-zinc-50 relative flex items-center justify-center p-3 border-b border-zinc-200">
-                          {p.imageUrl ? (
-                            <img
-                              src={p.imageUrl}
-                              alt={p.title}
-                              className="max-h-full max-w-full w-auto h-auto object-contain transition-transform duration-300 hover:scale-105"
-                              loading="lazy"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex flex-col items-center justify-center text-zinc-400 gap-1 bg-zinc-50">
-                              <ImageIcon size={28} />
-                              <span className="text-[11px] font-mono">{adminLang === 'ne' ? 'फोटो छैन' : 'No Photo'}</span>
-                            </div>
-                          )}
-                          {p.badge && (
-                            <span className="absolute top-3 left-3 bg-amber-500 text-zinc-950 text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 shadow rounded-xs">
-                              {p.badge}
-                            </span>
-                          )}
-                          <span
-                            className={`absolute top-3 right-3 text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 shadow rounded-xs ${
-                              p.inStock ? 'bg-[#1a3a2a] text-white border border-emerald-700' : 'bg-red-600 text-white'
-                            }`}
-                          >
-                            {p.inStock 
-                              ? (adminLang === 'ne' ? 'उपलब्ध (In Stock)' : 'In Stock') 
-                              : (adminLang === 'ne' ? 'सकियो (Out of Stock)' : 'Out of Stock')}
-                          </span>
-                        </div>
-
-                        <div className="p-4 space-y-2">
-                          <h4 className="font-serif font-bold text-zinc-900 text-base leading-snug">{p.title}</h4>
-                          <p className="text-xs font-serif text-zinc-600 line-clamp-2 leading-relaxed font-light">{p.description}</p>
-                          
-                          <div className="pt-2 flex items-center justify-between text-xs font-mono text-zinc-600 border-t border-zinc-100">
-                            <span>
-                              {adminLang === 'ne' ? 'न्यूनतम:' : 'Min Order:'} <strong className="text-zinc-900">{p.minOrder}</strong>
-                            </span>
-                            <span>
-                              {adminLang === 'ne' ? 'वर्ग:' : 'Category:'} <strong className="capitalize text-zinc-900">{p.category}</strong>
-                            </span>
-                          </div>
-                        </div>
+            <section aria-label="Products" className="flex flex-col gap-[18px]">
+              {(() => {
+                const pq = searchQuery.toLowerCase();
+                const shownProducts = products.filter((p) => (p.title + ' ' + p.category).toLowerCase().includes(pq));
+                return (
+                  <>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="text-sm text-[#5E6B62]">
+                        {T('Showing', 'देखाइँदै')} {shownProducts.length} {T('of', 'मध्ये')} {products.length} {T('products', 'उत्पादन')}
                       </div>
-
-                      <div className="p-4 pt-0 flex flex-col gap-2.5">
-                        <div className="flex items-center justify-between pt-2 border-t border-zinc-100">
-                          <div>
-                            <span className="text-[11px] font-mono text-zinc-500">
-                              {adminLang === 'ne' ? 'बिक्री मूल्य: ' : 'Price: '}
-                            </span>
-                            <span className="text-lg font-mono font-bold text-amber-600">Rs. {p.price}</span>
-                            <span className="text-xs font-mono text-zinc-500"> {p.unit}</span>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-2">
-                          <button
-                            onClick={() => handleToggleStock(p)}
-                            className={`flex items-center justify-center gap-1 text-[11px] font-mono font-bold uppercase py-2 transition cursor-pointer border rounded-xs ${
-                              p.inStock
-                                ? 'bg-zinc-50 text-zinc-700 border-zinc-300 hover:bg-zinc-100'
-                                : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
-                            }`}
-                          >
-                            {p.inStock ? <XCircle size={12} /> : <CheckCircle2 size={12} />}
-                            <span>
-                              {p.inStock 
-                                ? (adminLang === 'ne' ? 'आउट' : 'Mark Out') 
-                                : (adminLang === 'ne' ? 'इन स्टक' : 'Mark In')}
-                            </span>
-                          </button>
-
-                          <button
-                            onClick={() => handleOpenEditModal(p)}
-                            className="flex items-center justify-center gap-1 bg-white hover:bg-zinc-50 text-zinc-900 border border-zinc-300 font-mono font-bold text-[11px] uppercase py-2 transition cursor-pointer rounded-xs"
-                          >
-                            <Edit3 size={12} />
-                            <span>{adminLang === 'ne' ? 'सम्पादन' : 'Edit'}</span>
-                          </button>
-
-                          <button
-                            onClick={() => handleDeleteProduct(p.id)}
-                            className="flex items-center justify-center gap-1 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-mono font-bold text-[11px] uppercase py-2 transition cursor-pointer rounded-xs"
-                          >
-                            <Trash2 size={12} />
-                            <span>{adminLang === 'ne' ? 'मेटाउनुहोस्' : 'Delete'}</span>
-                          </button>
-                        </div>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={handleOpenAddModal}
+                        className="inline-flex items-center gap-2 h-[46px] px-5 border-0 rounded-xl bg-[#F4B63B] text-[#2A1B00] font-bold text-sm cursor-pointer hover:brightness-95 transition"
+                      >
+                        <Plus size={18} strokeWidth={2} />
+                        {T('Add new product', 'नयाँ उत्पादन थप्नुहोस्')}
+                      </button>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
+
+                    <div className="bg-white border border-[#E4DDCB] rounded-[18px] p-5 flex flex-wrap items-center gap-x-6 gap-y-4">
+                      <div className="shrink-0 w-12 h-12 rounded-xl bg-[#E3EFE6] text-[#17553A] flex items-center justify-center">
+                        <FileSpreadsheet size={24} strokeWidth={1.8} />
+                      </div>
+                      <div className="flex-[1_1_280px] min-w-0">
+                        <div className="hz-display font-bold text-lg">{T('Add many products at once', 'एकैपटक धेरै उत्पादन थप्नुहोस्')}</div>
+                        <div className="text-sm text-[#5E6B62]">
+                          {T('Download the Excel template, fill one product per row, then upload it here.', 'एक्सेल टेम्प्लेट डाउनलोड गर्नुहोस्, प्रति लाइन एक उत्पादन भर्नुहोस्, अनि यहाँ अपलोड गर्नुहोस्।')}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2.5">
+                        <button type="button" onClick={handleDownloadTemplate} className="inline-flex items-center gap-2 h-11 px-4 rounded-xl border border-[#DDD5BF] bg-white text-[#1A2A21] font-semibold text-sm cursor-pointer hover:brightness-95 transition">
+                          <Download size={18} strokeWidth={1.8} />
+                          {T('Download Excel template', 'एक्सेल टेम्प्लेट डाउनलोड')}
+                        </button>
+                        <input type="file" ref={bulkFileInputRef} onChange={handleBulkFile} accept=".xlsx,.xls,.csv" className="hidden" />
+                        <button
+                          type="button"
+                          disabled={bulkBusy}
+                          onClick={() => bulkFileInputRef.current?.click()}
+                          className="inline-flex items-center gap-2 h-11 px-4 border-0 rounded-xl bg-[#1D4A38] text-white font-bold text-sm cursor-pointer hover:brightness-110 transition disabled:opacity-60 disabled:cursor-wait"
+                        >
+                          {bulkBusy ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} strokeWidth={1.8} />}
+                          {bulkBusy ? T('Uploading...', 'अपलोड हुँदैछ...') : T('Upload filled file', 'भरिएको फाइल अपलोड')}
+                        </button>
+                      </div>
+
+                      {bulkResult && (
+                        <div className={`basis-full rounded-xl px-4 py-3 text-sm border ${bulkResult.errors.length ? 'bg-[#FFF6DC] border-[#EBCB78]' : 'bg-[#E3EFE6] border-[#BFD9C8]'}`}>
+                          <div className="font-bold flex items-center justify-between gap-3">
+                            <span>
+                              {T('Added', 'थपियो')} {bulkResult.added} {T('products', 'उत्पादन')}
+                              {bulkResult.skipped > 0 ? ` · ${T('skipped example rows', 'उदाहरण लाइन छोडियो')}: ${bulkResult.skipped}` : ''}
+                              {bulkResult.errors.length > 0 ? ` · ${bulkResult.errors.length} ${T('rows need fixing', 'लाइन सच्याउनुपर्छ')}` : ''}
+                            </span>
+                            <button type="button" onClick={() => setBulkResult(null)} aria-label="Dismiss" className="bg-transparent border-0 cursor-pointer text-[#5E6B62] text-base">✕</button>
+                          </div>
+                          {bulkResult.errors.length > 0 && (
+                            <ul className="mt-2 mb-0 pl-5 text-[13px] text-[#7A4A00] list-disc">
+                              {bulkResult.errors.slice(0, 20).map((er) => <li key={er}>{er}</li>)}
+                              {bulkResult.errors.length > 20 && <li>…and {bulkResult.errors.length - 20} more</li>}
+                            </ul>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {shownProducts.length === 0 ? (
+                      <div className="bg-white border border-dashed border-[#CFC6AD] rounded-[18px] py-12 px-6 text-center text-[#5E6B62]">
+                        {products.length === 0 ? T('No products yet. Add your first one.', 'अहिलेसम्म उत्पादन छैन। पहिलो थप्नुहोस्।') : T('No products match this search.', 'यो खोजसँग मिल्ने उत्पादन छैन।')}
+                      </div>
+                    ) : (
+                      <div className="grid gap-[18px]" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(270px,1fr))' }}>
+                        {shownProducts.map((p) => (
+                          <article key={p.id} className="bg-white border border-[#E4DDCB] rounded-[18px] overflow-hidden flex flex-col">
+                            <div className="relative h-[170px] bg-[#F6E3A1] flex items-center justify-center">
+                              {p.imageUrl ? (
+                                <img src={p.imageUrl} alt={p.title} loading="lazy" className="w-full h-full object-cover" />
+                              ) : (
+                                <ImageIcon size={44} strokeWidth={1.3} className="text-[#12301F] opacity-45" />
+                              )}
+                              {p.badge && (
+                                <span className="absolute left-3 top-3 px-2.5 py-1 rounded-lg bg-[#F4B63B] text-[#2A1B00] text-[11px] font-bold tracking-[0.05em] uppercase">{p.badge}</span>
+                              )}
+                              <span className={`absolute right-3 top-3 px-2.5 py-1 rounded-lg text-[11px] font-bold tracking-[0.05em] uppercase text-white ${p.inStock ? 'bg-[#12301F]' : 'bg-[#B0301B]'}`}>
+                                {p.inStock ? T('In stock', 'उपलब्ध') : T('Out of stock', 'सकियो')}
+                              </span>
+                            </div>
+                            <div className="p-[18px] flex flex-col gap-2.5 flex-1">
+                              <h3 className="hz-display m-0 font-bold text-lg leading-tight">{p.title}</h3>
+                              <p className="m-0 text-sm text-[#5E6B62] flex-1 line-clamp-3">{p.description}</p>
+                              <div className="flex justify-between gap-2 text-[13px] text-[#5E6B62] border-t border-[#EFE9D8] pt-2.5">
+                                <span>{T('Min order', 'न्यूनतम')}: <b className="text-[#1A2A21]">{p.minOrder}</b></span>
+                                <span className="capitalize">{p.category}</span>
+                              </div>
+                              <div className="flex items-baseline gap-1">
+                                <span className="hz-display font-bold text-[26px] text-[#9A3F10]">{money(p.price)}</span>
+                                <span className="text-[13px] text-[#5E6B62]">{p.unit}</span>
+                              </div>
+                              <div className="flex gap-2">
+                                <button type="button" onClick={() => handleToggleStock(p)} className="flex-1 h-[42px] rounded-[10px] border border-[#DDD5BF] bg-white text-[#1A2A21] font-semibold text-[13px] cursor-pointer hover:brightness-95 transition">
+                                  {p.inStock ? T('Mark out', 'आउट') : T('Mark in', 'इन स्टक')}
+                                </button>
+                                <button type="button" onClick={() => handleOpenEditModal(p)} className="flex-1 h-[42px] rounded-[10px] border border-[#DDD5BF] bg-white text-[#1A2A21] font-semibold text-[13px] cursor-pointer hover:brightness-95 transition">
+                                  {T('Edit', 'सम्पादन')}
+                                </button>
+                                <button type="button" onClick={() => handleDeleteProduct(p.id)} aria-label="Delete product" className="shrink-0 w-[42px] h-[42px] rounded-[10px] border border-[#E7B9AE] bg-[#FFF1EE] text-[#B0301B] flex items-center justify-center cursor-pointer hover:brightness-95 transition">
+                                  <Trash2 size={17} strokeWidth={1.8} />
+                                </button>
+                              </div>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </section>
           )}
 
           {/* Tab 6: Settings - Media & Hero Banner Manager */}
           {activeTab === 'settings' && (
-            <div className="space-y-6 max-w-4xl">
-              
-              {/* HERO BANNER PHOTO SETTINGS */}
-              <div className="bg-white border border-zinc-200 p-6 md:p-8 shadow-xs text-left space-y-5 rounded-xs">
-                <div className="border-b border-zinc-200 pb-4">
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-[#1a3a2a] border border-emerald-800 text-amber-300 text-[10px] font-mono font-bold uppercase tracking-widest mb-2 rounded-xs">
-                    <ImageIcon size={12} className="text-amber-400" />
-                    <span>HOMEPAGE HERO BANNER PHOTO</span>
-                  </div>
-                  <h3 className="font-serif font-black text-zinc-900 text-xl tracking-tight">
-                    {adminLang === 'ne' ? 'वेबसाइटको मुख्य (Hero) फोटो बदल्नुहोस्' : 'Change Homepage Main Banner Photo'}
-                  </h3>
-                  <p className="text-xs font-serif text-zinc-600 font-light mt-1 leading-relaxed">
-                    {adminLang === 'ne' 
-                      ? 'गृहपृष्ठ (Homepage) को दाहिने तर्फ देखिने मुख्य हाँसको फोटोलाई यहाँबाट ग्यालेरी वा फाइल छानेर परिवर्तन गर्न सक्नुहुन्छ।' 
-                      : 'Upload or paste a new image to instantly replace the main hero duck specimen photo on the homepage.'}
-                  </p>
-                </div>
+            <section aria-label="Media and settings">
+              {(() => {
+                const badge = 'inline-flex items-center gap-1.5 px-2.5 py-[3px] rounded-lg bg-[#12301F] text-white text-[11px] font-bold tracking-[0.06em] uppercase';
+                const field = 'w-full h-[46px] box-border px-3.5 rounded-xl border border-[#DDD5BF] bg-white text-sm text-[#1A2A21] outline-none focus:border-[#1D4A38] font-normal';
+                const area = 'w-full box-border px-3.5 py-2.5 rounded-xl border border-[#DDD5BF] bg-white text-sm text-[#1A2A21] outline-none focus:border-[#1D4A38] resize-none font-normal';
+                const lbl = 'flex flex-col gap-1.5 text-[13px] font-semibold';
+                const card = 'bg-white border border-[#E4DDCB] rounded-[18px] p-6 flex flex-col gap-5';
+                const patchVideo = (patch: Partial<VideoData>) =>
+                  setVideoConfigs({ ...videoConfigs, [selectedVideoTab]: { ...videoConfigs[selectedVideoTab], ...patch } });
+                const slotLabel = (k: 'ducklings' | 'hatchery' | 'breeders') =>
+                  k === 'ducklings' ? '🦆 ' + T('Ducklings batch', 'चल्ला ब्याच')
+                  : k === 'hatchery' ? '🥚 ' + T('Hatching incubator', 'ह्याचिङ इन्क्युबेटर')
+                  : '🌾 ' + T('Breeder flock', 'प्रजनन बथान');
+                const ok = (msg: string) => (
+                  <span className="text-[#17553A] font-semibold text-sm flex items-center gap-1.5"><CheckCircle2 size={16} />{msg}</span>
+                );
 
-                <form onSubmit={handleSaveHeroBanner} className="space-y-4 text-xs font-sans">
-                  <div className="flex flex-col sm:flex-row items-center gap-5">
-                    <div className="w-48 h-36 bg-zinc-900 border-2 border-zinc-300 overflow-hidden flex items-center justify-center relative shrink-0 rounded-xs shadow-inner">
-                      <img src={heroBannerUrl} alt="Hero Banner Preview" className="w-full h-full object-cover" />
-                    </div>
-
-                    <div className="space-y-3 flex-1 text-left">
-                      <input
-                        type="file"
-                        ref={heroFileInputRef}
-                        onChange={handleHeroBannerFileChange}
-                        accept="image/*"
-                        className="hidden"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => heroFileInputRef.current?.click()}
-                        className="inline-flex items-center gap-2 bg-amber-400 hover:bg-amber-300 text-zinc-950 font-black uppercase tracking-wider px-4 py-3 transition shadow cursor-pointer text-xs rounded-xs"
-                      >
-                        <Upload size={15} />
-                        <span>{adminLang === 'ne' ? 'ग्यालेरीबाट मुख्य फोटो छान्नुहोस्' : 'Choose Hero Photo from Gallery'}</span>
-                      </button>
-
-                      <div>
-                        <label className="block font-mono text-[11px] font-bold text-zinc-700 uppercase tracking-wider mb-1">
-                          Or Paste Image URL:
-                        </label>
-                        <input
-                          type="url"
-                          value={heroBannerUrl}
-                          onChange={(e) => setHeroBannerUrl(e.target.value)}
-                          className="w-full px-3 py-2 border border-zinc-300 font-mono text-zinc-900 bg-white focus:border-emerald-700 outline-none rounded-xs"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="pt-3 border-t border-zinc-200 flex items-center gap-3">
-                    <button
-                      type="submit"
-                      className="py-3 px-6 bg-[#1a3a2a] hover:bg-[#12271c] text-amber-300 font-bold uppercase tracking-wider text-xs transition shadow-sm cursor-pointer flex items-center gap-2 rounded-xs border border-emerald-800"
-                    >
-                      <Save size={14} />
-                      <span>Update Hero Banner Live</span>
-                    </button>
-
-                    {savedHeroSuccess && (
-                      <span className="text-emerald-700 font-mono font-bold text-xs flex items-center gap-1">
-                        <CheckCircle2 size={14} /> Hero Photo Updated Successfully!
-                      </span>
-                    )}
-                  </div>
-                </form>
-              </div>
-
-              {/* GALLERY VIDEO UPLOADER & ARCHIVE */}
-              <div className="bg-white border border-zinc-200 p-6 md:p-8 shadow-xs text-left space-y-6 rounded-xs">
-                <div className="border-b border-zinc-200 pb-4">
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-[#1a3a2a] border border-emerald-800 text-amber-300 text-[10px] font-mono font-bold uppercase tracking-widest mb-2 rounded-xs">
-                    <Video size={12} className="text-amber-400" />
-                    <span>GALLERY VIDEO UPLOADER & ARCHIVE</span>
-                  </div>
-                  <h3 className="font-serif font-black text-zinc-900 text-xl tracking-tight">
-                    {adminLang === 'ne' ? 'फार्म प्रत्यक्ष भिडियो ग्यालेरीबाट सिधै अपलोड गर्नुहोस्' : 'Upload Live Footage From Gallery / Device'}
-                  </h3>
-                  <p className="text-xs font-serif text-zinc-600 font-light mt-1 leading-relaxed">
-                    {adminLang === 'ne' 
-                      ? 'कुनै बाहिरी लिङ्क चाहिंदैन! आफ्नो फोन वा कम्प्युटरको ग्यालेरीबाट सिधै भिडियो (.mp4, .mov) छानेर अपलोड गर्नुहोस्।' 
-                      : 'No external links required! Pick and upload high-resolution farm clips directly from your local device/gallery.'}
-                  </p>
-                </div>
-
-                <form onSubmit={handleSaveVideoSettings} className="space-y-6 text-xs font-sans">
-                  <div className="p-4 bg-zinc-50 border border-zinc-200 space-y-2 rounded-xs">
-                    <label className="block font-mono font-bold text-zinc-800 uppercase tracking-wider text-[11px]">
-                      Official YouTube Channel Link (Top Right Red Button)
-                    </label>
-                    <input
-                      type="url"
-                      required
-                      value={channelUrl}
-                      onChange={(e) => setChannelUrl(e.target.value)}
-                      placeholder="https://youtube.com/@duckfarmnepal"
-                      className="w-full px-3.5 py-2.5 border border-zinc-300 font-mono text-zinc-900 bg-white focus:border-emerald-700 outline-none rounded-xs"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-mono font-bold text-zinc-700 uppercase tracking-wider mb-2 text-[11px]">
-                      Select Video Slot to Update:
-                    </label>
-                    <div className="flex flex-wrap gap-2">
-                      {(['ducklings', 'hatchery', 'breeders'] as const).map((tabKey) => (
-                        <button
-                          key={tabKey}
-                          type="button"
-                          onClick={() => {
-                            setSelectedVideoTab(tabKey);
-                            setSelectedVideoFile(null);
-                            setVideoPreviewUrl(null);
-                          }}
-                          className={`px-4 py-2 text-xs font-mono font-bold uppercase tracking-wider transition cursor-pointer rounded-xs border ${
-                            selectedVideoTab === tabKey
-                              ? 'bg-[#1a3a2a] text-amber-300 border-amber-500 shadow-sm'
-                              : 'bg-zinc-50 text-zinc-700 border-zinc-300 hover:bg-zinc-100'
-                          }`}
-                        >
-                          {tabKey === 'ducklings' && '🦆 1. Ducklings Batch'}
-                          {tabKey === 'hatchery' && '🥚 2. Hatching Incubator'}
-                          {tabKey === 'breeders' && '🌾 3. Breeder Flock'}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="p-5 border-2 border-dashed border-zinc-300 bg-zinc-50 space-y-4 rounded-xs">
-                    <div className="flex flex-col sm:flex-row items-center gap-5">
-                      <div className="w-44 h-40 bg-zinc-900 border border-zinc-700 overflow-hidden flex items-center justify-center relative shrink-0 rounded-xs">
-                        {videoPreviewUrl ? (
-                          <video src={videoPreviewUrl} controls className="w-full h-full object-contain" />
-                        ) : (
-                          <div className="text-center p-3 text-zinc-400 font-mono text-[10px] space-y-1">
-                            <Video size={28} className="mx-auto text-amber-400" />
-                            <p>Current Active Video</p>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="space-y-2 flex-1 text-left">
-                        <input
-                          type="file"
-                          ref={videoFileInputRef}
-                          onChange={handleVideoFileSelect}
-                          accept="video/*"
-                          className="hidden"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => videoFileInputRef.current?.click()}
-                          className="inline-flex items-center gap-2 bg-amber-400 hover:bg-amber-300 text-zinc-950 font-black uppercase tracking-wider px-4 py-3 transition shadow cursor-pointer text-xs rounded-xs"
-                        >
-                          <Upload size={15} />
-                          <span>{adminLang === 'ne' ? 'ग्यालेरीबाट भिडियो फाइल छान्नुहोस्' : 'Choose Video From Device / Gallery'}</span>
-                        </button>
-
-                        {selectedVideoFile && (
-                          <p className="font-mono text-emerald-700 font-bold text-xs">
-                            Selected: {selectedVideoFile.name} ({(selectedVideoFile.size / (1024 * 1024)).toFixed(2)} MB)
+                return (
+                  <form onSubmit={handleSaveVideoSettings} className="grid gap-[18px] grid-cols-1 xl:grid-cols-12 items-start">
+                    {/* HERO BANNER */}
+                    <div className={card + ' xl:col-span-7'}>
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <span className={badge}><ImageIcon size={12} />{T('Homepage banner', 'होमपेज ब्यानर')}</span>
+                          <h2 className="hz-display mt-2.5 mb-1 font-bold text-[22px]">{T('Main banner photo', 'मुख्य ब्यानर फोटो')}</h2>
+                          <p className="m-0 text-sm text-[#5E6B62] max-w-[440px]">
+                            {T('Upload a new image or paste a link. It replaces the hero photo on your homepage.', 'नयाँ फोटो अपलोड गर्नुहोस् वा लिङ्क राख्नुहोस्। यसले होमपेजको मुख्य फोटो बदल्छ।')}
                           </p>
-                        )}
+                        </div>
+                      </div>
 
-                        <p className="text-[11px] font-serif text-zinc-500 font-light">
-                          MP4, MOV, WebM formats supported. Direct local storage in your browser IndexedDB.
-                        </p>
+                      <div className="flex flex-wrap gap-5 items-stretch">
+                        <div className="flex-[1_1_260px] min-h-[190px] rounded-2xl overflow-hidden bg-[#F6E3A1] flex items-center justify-center">
+                          {heroBannerUrl ? (
+                            <img src={heroBannerUrl} alt="Hero Banner Preview" className="w-full h-full object-cover" />
+                          ) : (
+                            <ImageIcon size={44} strokeWidth={1.4} className="text-[#12301F] opacity-60" />
+                          )}
+                        </div>
+                        <div className="flex-[1_1_260px] min-w-0 flex flex-col justify-between gap-4">
+                          <div className="flex flex-col gap-3">
+                            <input type="file" ref={heroFileInputRef} onChange={handleHeroBannerFileChange} accept="image/*" className="hidden" />
+                            <button
+                              type="button"
+                              onClick={() => heroFileInputRef.current?.click()}
+                              className="inline-flex items-center justify-center gap-2 h-[46px] px-5 border-0 rounded-xl bg-[#F4B63B] text-[#2A1B00] font-bold text-sm cursor-pointer hover:brightness-95 transition"
+                            >
+                              <Upload size={18} strokeWidth={1.8} />
+                              {T('Choose photo from gallery', 'ग्यालेरीबाट फोटो छान्नुहोस्')}
+                            </button>
+                            <label className={lbl}>
+                              {T('Or paste image link', 'वा फोटोको लिङ्क राख्नुहोस्')}
+                              <input
+                                type="url"
+                                value={heroBannerUrl}
+                                onChange={(e) => setHeroBannerUrl(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+                                placeholder="https://"
+                                className={field}
+                              />
+                            </label>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={(e) => handleSaveHeroBanner(e as unknown as React.FormEvent)}
+                              className="inline-flex items-center gap-2 h-[46px] px-[22px] border-0 rounded-xl bg-[#1D4A38] text-white font-bold text-sm cursor-pointer hover:brightness-110 transition"
+                            >
+                              <Save size={16} />
+                              {T('Update banner live', 'ब्यानर लाइभ अपडेट गर्नुहोस्')}
+                            </button>
+                            {savedHeroSuccess && ok(T('Banner updated', 'ब्यानर अपडेट भयो'))}
+                          </div>
+                        </div>
                       </div>
                     </div>
 
-                    <div className="pt-4 border-t border-zinc-200 grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block font-mono font-bold text-zinc-700 uppercase tracking-wider mb-1">
-                          Title (English) *
+                    {/* RIGHT COLUMN: channel link + where things show */}
+                    <div className="xl:col-span-5 flex flex-col gap-[18px]">
+                      <div className={card}>
+                        <div>
+                          <span className={badge}>{T('Channel link', 'च्यानल लिङ्क')}</span>
+                          <h2 className="hz-display mt-2.5 mb-1 font-bold text-[22px]">{T('YouTube channel', 'YouTube च्यानल')}</h2>
+                          <p className="m-0 text-sm text-[#5E6B62]">{T('This powers the red YouTube button at the top right of your site.', 'यसले साइटको माथि दायाँको रातो YouTube बटन चलाउँछ।')}</p>
+                        </div>
+                        <label className={lbl}>
+                          {T('Official channel link', 'आधिकारिक च्यानल लिङ्क')}
+                          <input type="url" required value={channelUrl} onChange={(e) => setChannelUrl(e.target.value)} placeholder="https://youtube.com/@duckfarmnepal" className={field} />
                         </label>
-                        <input
-                          type="text"
-                          required
-                          value={videoConfigs[selectedVideoTab].titleEn}
-                          onChange={(e) =>
-                            setVideoConfigs({
-                              ...videoConfigs,
-                              [selectedVideoTab]: {
-                                ...videoConfigs[selectedVideoTab],
-                                titleEn: e.target.value
-                              }
-                            })
-                          }
-                          className="w-full px-3.5 py-2 border border-zinc-300 text-zinc-900 bg-white focus:border-emerald-700 outline-none rounded-xs"
-                        />
+                        <p className="m-0 text-[13px] text-[#5E6B62]">{T('Saved together with the video below when you press Upload & publish.', 'तलको भिडियोसँगै "अपलोड र प्रकाशित" थिच्दा सेभ हुन्छ।')}</p>
                       </div>
 
-                      <div>
-                        <label className="block font-mono font-bold text-zinc-700 uppercase tracking-wider mb-1">
-                          Title (Nepali) *
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          value={videoConfigs[selectedVideoTab].titleNe}
-                          onChange={(e) =>
-                            setVideoConfigs({
-                              ...videoConfigs,
-                              [selectedVideoTab]: {
-                                ...videoConfigs[selectedVideoTab],
-                                titleNe: e.target.value
-                              }
-                            })
-                          }
-                          className="w-full px-3.5 py-2 border border-zinc-300 text-zinc-900 bg-white focus:border-emerald-700 outline-none rounded-xs"
-                        />
+                      <div className="rounded-[18px] bg-[#12301F] text-[#D7E4DA] p-6 flex flex-col gap-4">
+                        <div className="hz-display font-bold text-lg text-white">{T('Where changes show up', 'परिवर्तन कहाँ देखिन्छ')}</div>
+                        {[
+                          { Icon: ImageIcon, title: T('Banner photo', 'ब्यानर फोटो'), text: T('Hero image on the homepage', 'होमपेजको मुख्य फोटो') },
+                          { Icon: Video, title: T('Gallery videos', 'ग्यालेरी भिडियो'), text: T('Video section, three slots', 'भिडियो खण्ड, तीन स्लट') },
+                          { Icon: ExternalLink, title: T('Channel link', 'च्यानल लिङ्क'), text: T('Red YouTube button, top right', 'माथि दायाँको रातो YouTube बटन') }
+                        ].map(({ Icon, title, text }) => (
+                          <div key={title} className="flex items-center gap-3">
+                            <div className="shrink-0 w-10 h-10 rounded-xl bg-[#1F4A36] text-[#F4B63B] flex items-center justify-center">
+                              <Icon size={18} strokeWidth={1.8} />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-semibold text-white text-sm">{title}</div>
+                              <div className="text-[13px] text-[#D7E4DA]">{text}</div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* GALLERY VIDEOS: full width, two columns inside */}
+                    <div className={card + ' xl:col-span-12'}>
                       <div>
-                        <label className="block font-mono font-bold text-zinc-700 uppercase tracking-wider mb-1">
-                          Description (English)
-                        </label>
-                        <textarea
-                          rows={2}
-                          value={videoConfigs[selectedVideoTab].descEn}
-                          onChange={(e) =>
-                            setVideoConfigs({
-                              ...videoConfigs,
-                              [selectedVideoTab]: {
-                                ...videoConfigs[selectedVideoTab],
-                                descEn: e.target.value
-                              }
-                            })
-                          }
-                          className="w-full px-3.5 py-2 border border-zinc-300 text-zinc-900 bg-white focus:border-emerald-700 outline-none resize-none font-serif rounded-xs"
-                        />
+                        <span className={badge}><Video size={12} />{T('Gallery videos', 'ग्यालेरी भिडियो')}</span>
+                        <h2 className="hz-display mt-2.5 mb-1 font-bold text-[22px]">{T('Live footage from your device', 'तपाईंको डिभाइसबाट प्रत्यक्ष भिडियो')}</h2>
+                        <p className="m-0 text-sm text-[#5E6B62]">{T('Pick and upload farm clips straight from your phone or computer. No links needed.', 'फोन वा कम्प्युटरबाट सिधै फार्मका क्लिप अपलोड गर्नुहोस्। लिङ्क चाहिँदैन।')}</p>
                       </div>
 
-                      <div>
-                        <label className="block font-mono font-bold text-zinc-700 uppercase tracking-wider mb-1">
-                          Description (Nepali)
-                        </label>
-                        <textarea
-                          rows={2}
-                          value={videoConfigs[selectedVideoTab].descNe}
-                          onChange={(e) =>
-                            setVideoConfigs({
-                              ...videoConfigs,
-                              [selectedVideoTab]: {
-                                ...videoConfigs[selectedVideoTab],
-                                descNe: e.target.value
-                              }
-                            })
-                          }
-                          className="w-full px-3.5 py-2 border border-zinc-300 text-zinc-900 bg-white focus:border-emerald-700 outline-none resize-none font-serif rounded-xs"
-                        />
+                      <div className="grid gap-6 grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+                        {/* left: slot + preview + file */}
+                        <div className="flex flex-col gap-4">
+                          <div>
+                            <div className="text-xs font-semibold tracking-[0.06em] uppercase text-[#5E6B62] mb-2">{T('Video slot to update', 'अपडेट गर्ने भिडियो स्लट')}</div>
+                            <div className="flex flex-wrap gap-2">
+                              {(['ducklings', 'hatchery', 'breeders'] as const).map((tabKey) => {
+                                const on = selectedVideoTab === tabKey;
+                                return (
+                                  <button
+                                    key={tabKey}
+                                    type="button"
+                                    aria-pressed={on}
+                                    onClick={() => {
+                                      setSelectedVideoTab(tabKey);
+                                      setSelectedVideoFile(null);
+                                      setVideoPreviewUrl(null);
+                                    }}
+                                    className={`inline-flex items-center min-h-[40px] box-border px-4 rounded-full text-[13px] font-bold border cursor-pointer transition ${
+                                      on ? 'border-[#1D4A38] bg-[#1D4A38] text-white' : 'border-[#DDD5BF] bg-white text-[#5E6B62] hover:bg-[#F5F1E6]'
+                                    }`}
+                                  >
+                                    {slotLabel(tabKey)}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          <div className="aspect-video w-full rounded-2xl overflow-hidden bg-[#12301F] flex items-center justify-center">
+                            {videoPreviewUrl ? (
+                              <video src={videoPreviewUrl} controls className="w-full h-full object-contain" />
+                            ) : (
+                              <div className="text-center text-sm text-[#D7E4DA] flex flex-col items-center gap-2">
+                                <Video size={34} className="text-[#F4B63B]" strokeWidth={1.6} />
+                                {T('Current active video', 'हालको सक्रिय भिडियो')}
+                              </div>
+                            )}
+                          </div>
+
+                          <input type="file" ref={videoFileInputRef} onChange={handleVideoFileSelect} accept="video/*" className="hidden" />
+                          <button
+                            type="button"
+                            onClick={() => videoFileInputRef.current?.click()}
+                            className="flex flex-col items-center justify-center gap-1.5 min-h-[110px] border-2 border-dashed border-[#CFC6AD] rounded-2xl bg-[#FBF8EF] text-[#1A2A21] font-semibold text-[15px] cursor-pointer hover:bg-[#F5F1E6] transition"
+                          >
+                            <Upload size={26} strokeWidth={1.6} className="text-[#1D4A38]" />
+                            {T('Choose video files to upload', 'अपलोड गर्न भिडियो छान्नुहोस्')}
+                            <span className="font-normal text-[13px] text-[#5E6B62]">
+                              {selectedVideoFile
+                                ? `${selectedVideoFile.name} (${(selectedVideoFile.size / (1024 * 1024)).toFixed(2)} MB)`
+                                : T('MP4 or MOV, high resolution is fine', 'MP4 वा MOV, उच्च रिजोलुसन ठीक छ')}
+                            </span>
+                          </button>
+                        </div>
+
+                        {/* right: titles, descriptions, publish */}
+                        <div className="flex flex-col gap-4">
+                          <div className="flex items-center gap-2 text-sm text-[#5E6B62]">
+                            {T('Editing slot', 'सम्पादन स्लट')}: <b className="text-[#1A2A21]">{slotLabel(selectedVideoTab)}</b>
+                          </div>
+                          <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))' }}>
+                            <label className={lbl}>
+                              {T('Title (English)', 'शीर्षक (अंग्रेजी)')} *
+                              <input type="text" required value={videoConfigs[selectedVideoTab].titleEn} onChange={(e) => patchVideo({ titleEn: e.target.value })} className={field} />
+                            </label>
+                            <label className={lbl}>
+                              {T('Title (Nepali)', 'शीर्षक (नेपाली)')} *
+                              <input type="text" required value={videoConfigs[selectedVideoTab].titleNe} onChange={(e) => patchVideo({ titleNe: e.target.value })} className={field} />
+                            </label>
+                          </div>
+                          <label className={lbl}>
+                            {T('Description (English)', 'विवरण (अंग्रेजी)')}
+                            <textarea rows={3} value={videoConfigs[selectedVideoTab].descEn} onChange={(e) => patchVideo({ descEn: e.target.value })} className={area} />
+                          </label>
+                          <label className={lbl}>
+                            {T('Description (Nepali)', 'विवरण (नेपाली)')}
+                            <textarea rows={3} value={videoConfigs[selectedVideoTab].descNe} onChange={(e) => patchVideo({ descNe: e.target.value })} className={area} />
+                          </label>
+                          <div className="border-t border-[#EFE9D8] pt-4 flex flex-wrap items-center gap-3">
+                            <button type="submit" className="inline-flex items-center gap-2 h-[46px] px-[22px] border-0 rounded-xl bg-[#1D4A38] text-white font-bold text-sm cursor-pointer hover:brightness-110 transition">
+                              <Save size={16} />
+                              {T('Upload & publish video', 'भिडियो अपलोड र प्रकाशित')}
+                            </button>
+                            {savedVideoSuccess && ok(T('Saved and live on site', 'सेभ भयो र साइटमा लाइभ छ'))}
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-
-                  <div className="pt-2 flex items-center gap-3">
-                    <button
-                      type="submit"
-                      className="py-3 px-6 bg-amber-400 hover:bg-amber-300 text-zinc-950 font-black uppercase tracking-wider text-xs transition shadow-sm cursor-pointer flex items-center gap-2 rounded-xs"
-                    >
-                      <Save size={14} />
-                      <span>Upload & Publish Video</span>
-                    </button>
-
-                    {savedVideoSuccess && (
-                      <span className="text-emerald-700 font-mono font-bold text-xs flex items-center gap-1">
-                        <CheckCircle2 size={14} /> Video Saved & Live on Site!
-                      </span>
-                    )}
-                  </div>
-                </form>
-              </div>
-
-            </div>
+                  </form>
+                );
+              })()}
+            </section>
           )}
 
-        </main>
-      </div>
-
-      {/* Corporate Admin Footer */}
-      <footer className="bg-white border-t border-zinc-200 py-4 px-4 mt-12">
-        <div className="max-w-site mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-zinc-500 font-mono">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-zinc-900 font-serif">
-              {adminLang === 'ne' ? 'हजारीदेवी डक फार्म पोर्टल' : 'Hazaridevi Duck Farm Management Portal'}
-            </span>
-            <span className="text-zinc-300">|</span>
-            <span className="bg-zinc-100 border border-zinc-300 text-zinc-800 font-bold px-2 py-0.5 text-[10px] rounded-xs">
-              v1.0.4 Production
-            </span>
-            <span className="text-zinc-300 hidden md:inline">|</span>
-            <span className="hidden md:inline-flex items-center gap-1 text-zinc-700 text-[11px]">
-              <ShieldCheck size={13} className="text-emerald-700" />
-              <span>{adminLang === 'ne' ? 'प्रमाणित प्रशासक पहुँच' : 'Authenticated Admin Access'}</span>
+        {/* FOOTER */}
+        <footer className="mt-auto border-t border-[#DDD5BF] pt-5 pb-6 flex flex-wrap items-center justify-between gap-3 text-[13px] text-[#5E6B62]">
+          <div className="flex flex-wrap items-center gap-3">
+            <b className="hz-display text-sm text-[#1A2A21]">
+              {T('Hazaridevi Duck Farm Management Portal', 'हजारीदेवी डक फार्म पोर्टल')}
+            </b>
+            <span className="px-2 py-0.5 rounded-md bg-[#E9E3D0] font-semibold">v1.0.4 Production</span>
+            <span className="hidden md:inline-flex items-center gap-1">
+              <ShieldCheck size={13} className="text-[#1D4A38]" />
+              {T('Authenticated admin access', 'प्रमाणित प्रशासक पहुँच')}
             </span>
           </div>
-
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-[#1a3a2a] border border-emerald-800 text-[11px] text-zinc-200 rounded-xs">
-            <Code size={12} className="text-amber-400" />
-            <span>Engineered & Maintained by</span>
-            <span className="text-white font-bold font-sans">
-              Ujjawal Kumar Sah
-            </span>
-          </div>
-        </div>
-      </footer>
+        </footer>
+      </main>
 
       {/* MODAL: UPDATE BUS DISPATCH & TRACKING */}
       {dispatchOrder && (

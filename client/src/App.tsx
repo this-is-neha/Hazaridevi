@@ -17,9 +17,7 @@ import { Reveal, CountUp } from './Reveal';
 
 // Pages other than Home are downloaded only when visited (smaller first load).
 // React.lazy needs a default export, so map each named export onto `default`.
-const DeliveryProcess = lazy(() => import('./DeliveryProcess').then((m) => ({ default: m.DeliveryProcess })));
-const Gallery = lazy(() => import('./Gallery').then((m) => ({ default: m.Gallery })));
-const LegalDocs = lazy(() => import('./LegalDocs').then((m) => ({ default: m.LegalDocs })));
+const AboutPage = lazy(() => import('./AboutPage').then((m) => ({ default: m.AboutPage })));
 const OrderForm = lazy(() => import('./OrderForm').then((m) => ({ default: m.OrderForm })));
 const BreakEvenGuideSection = lazy(() => import('./FarmGuide').then((m) => ({ default: m.BreakEvenGuideSection })));
 const AdminDashboard = lazy(() => import('./AdminDashboard').then((m) => ({ default: m.AdminDashboard })));
@@ -177,7 +175,7 @@ const HomePage = ({ onOpenSellModal, onOpenVisitModal }: HomePageProps) => {
 
           {/* Card 2: Hatchery & Health */}
           <div 
-            onClick={() => navigate('/gallery')}
+            onClick={() => navigate('/products')}
             className="p-7 hover:bg-zinc-50 transition cursor-pointer group"
           >
             <div className="text-xs font-mono uppercase tracking-wider text-amber-700 mb-1.5 font-bold">
@@ -198,7 +196,7 @@ const HomePage = ({ onOpenSellModal, onOpenVisitModal }: HomePageProps) => {
 
           {/* Card 3: Safe Delivery */}
           <div 
-            onClick={() => navigate('/delivery')}
+            onClick={() => navigate('/about')}
             className="p-7 hover:bg-zinc-50 transition cursor-pointer group"
           >
             <div className="text-xs font-mono uppercase tracking-wider text-amber-700 mb-1.5 font-bold">
@@ -345,10 +343,10 @@ const MainAppLayout: React.FC = () => {
           />
           <Route path="/products" element={<div className="py-6"><ProductCatalog /></div>} />
           <Route path="/order" element={<div className="py-6"><OrderForm /></div>} />
-          <Route path="/delivery" element={<div className="py-6"><DeliveryProcess /></div>} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="/delivery" element={<Navigate to="/about" replace />} />
           <Route path="/guide" element={<div className="py-6"><BreakEvenGuideSection /></div>} />
-          <Route path="/gallery" element={<div className="py-6"><Gallery /><YouTubeVideos /></div>} />
-          <Route path="/legal" element={<div className="py-6"><LegalDocs /></div>} />
+          <Route path="/legal" element={<Navigate to="/about" replace />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/verify-email" element={<VerifyEmailPage />} />
@@ -372,7 +370,7 @@ const MainAppLayout: React.FC = () => {
       {/* STANDARDIZED FOOTER */}
       <Footer 
         onOpenVisitModal={() => setIsVisitModalOpen(true)}
-        onOpenLegalModal={() => navigate('/legal')}
+        onOpenLegalModal={() => navigate('/about')}
       />
 
       <WhatsAppButton />

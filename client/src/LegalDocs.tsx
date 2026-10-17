@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLang } from './LanguageContext';
-import { ShieldCheck, FileText, CheckCircle2, ExternalLink, X, Loader2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ShieldCheck, FileText, CheckCircle2, ExternalLink, X, Loader2, MapPin, ArrowRight } from 'lucide-react';
 
 interface CertificateItem {
   id: string;
@@ -14,7 +15,8 @@ interface CertificateItem {
   holderNe: string;
   addressEn: string;
   addressNe: string;
-  docUrl: string;
+  // Cards without a scanned certificate (e.g. the farm location card) leave this empty
+  docUrl?: string;
 }
 
 export const LEGAL_DOCS: CertificateItem[] = [
@@ -45,6 +47,19 @@ export const LEGAL_DOCS: CertificateItem[] = [
     addressEn: 'Bariyarpatti, Siraha, Madhesh Province, Nepal',
     addressNe: 'बरियारपट्टी, सिराहा, मधेश प्रदेश, नेपाल',
     docUrl: '/fd632b40-adc1-4341-ab75-342d1a23a06e.jpeg'
+  },
+  {
+    id: 'location',
+    titleEn: 'Farm Location & Visits',
+    titleNe: 'फार्मको ठेगाना तथा अवलोकन',
+    regTypeEn: 'Open for farm visits by appointment',
+    regTypeNe: 'पूर्व जानकारीसहित फार्म अवलोकन खुला',
+    regNumberEn: 'Phone / WhatsApp: 9807760832',
+    regNumberNe: 'फोन / ह्वाट्सएप: ९८०७७६०८३२',
+    holderEn: 'Hazaridevi Multipurpose Agriculture Farm',
+    holderNe: 'हजारी देवी बहुउद्देश्य कृषि फार्म',
+    addressEn: 'Bariyarpatti, Siraha, Madhesh Province, Nepal',
+    addressNe: 'बरियारपट्टी, सिराहा, मधेश प्रदेश, नेपाल'
   }
 ];
 
@@ -55,6 +70,7 @@ export const LegalDocs: React.FC = () => {
 
   useEffect(() => {
     LEGAL_DOCS.forEach((doc) => {
+      if (!doc.docUrl) return;
       const img = new Image();
       img.src = doc.docUrl;
     });
@@ -90,7 +106,7 @@ export const LegalDocs: React.FC = () => {
         </div>
 
         {/* Certificates Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
           {LEGAL_DOCS.map((doc) => (
             <div
               key={doc.id}
@@ -99,12 +115,14 @@ export const LegalDocs: React.FC = () => {
               <div className="space-y-4">
                 <div className="flex items-start justify-between gap-4">
                   <div className="w-12 h-12 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center shrink-0 shadow-xs">
-                    <FileText className="text-amber-600" size={24} />
+                    {doc.docUrl ? <FileText className="text-amber-600" size={24} /> : <MapPin className="text-amber-600" size={24} />}
                   </div>
-                  <span className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-900 border border-emerald-300 text-xs font-bold px-2.5 py-1 rounded-sm">
-                    <CheckCircle2 size={13} className="text-emerald-600" />
-                    <span>{lang === 'ne' ? 'प्रमाणित (Verified)' : 'Verified Document'}</span>
-                  </span>
+                  {doc.docUrl && (
+                    <span className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-900 border border-emerald-300 text-xs font-bold px-2.5 py-1 rounded-sm">
+                      <CheckCircle2 size={13} className="text-emerald-600" />
+                      <span>{lang === 'ne' ? 'प्रमाणित (Verified)' : 'Verified Document'}</span>
+                    </span>
+                  )}
                 </div>
 
                 <div>
@@ -130,15 +148,27 @@ export const LegalDocs: React.FC = () => {
               </div>
 
               <div className="pt-2 border-t border-zinc-200 flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => handleOpenDoc(doc)}
-                  className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-amber-700 hover:text-amber-900 uppercase tracking-wider transition cursor-pointer"
-                >
-                  <span>{lang === 'ne' ? 'प्रमाणपत्र हेर्नुहोस् (Inspect)' : 'Inspect Document'}</span>
-                  <ExternalLink size={14} />
-                </button>
-                <span className="text-[11px] font-mono text-zinc-400 font-bold uppercase">SECURE VERIFIED</span>
+                {doc.docUrl ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenDoc(doc)}
+                      className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-amber-700 hover:text-amber-900 uppercase tracking-wider transition cursor-pointer"
+                    >
+                      <span>{lang === 'ne' ? 'प्रमाणपत्र हेर्नुहोस् (Inspect)' : 'Inspect Document'}</span>
+                      <ExternalLink size={14} />
+                    </button>
+                    <span className="text-[11px] font-mono text-zinc-400 font-bold uppercase">SECURE VERIFIED</span>
+                  </>
+                ) : (
+                  <Link
+                    to="/contact"
+                    className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-amber-700 hover:text-amber-900 uppercase tracking-wider transition"
+                  >
+                    <span>{lang === 'ne' ? 'सम्पर्क गर्नुहोस्' : 'Get in touch'}</span>
+                    <ArrowRight size={14} />
+                  </Link>
+                )}
               </div>
             </div>
           ))}
@@ -147,7 +177,7 @@ export const LegalDocs: React.FC = () => {
       </div>
 
       {/* Lightbox / Document Preview Modal */}
-      {selectedDoc && (
+      {selectedDoc && selectedDoc.docUrl && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-xs p-4 cursor-pointer"
           onClick={() => setSelectedDoc(null)}

@@ -109,11 +109,11 @@ export const ContactPage: React.FC = () => {
   return (
     <div className="font-sans text-left">
       {/* HEADER BAND */}
-      <section className="relative overflow-hidden bg-[#1a3a2a] text-white border-b-2 border-amber-500 px-4 sm:px-8 py-14 sm:py-16">
+      <section className="relative overflow-hidden bg-amber-50 text-zinc-950 border-b-2 border-amber-500 px-4 sm:px-8 py-14 sm:py-16">
         <div className="pointer-events-none absolute -top-32 -right-32 w-96 h-96 rounded-full bg-amber-400/10 blur-3xl" />
         <div className="relative max-w-site mx-auto space-y-3">
-          <div className="animate-hero flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-amber-400">
-            <span className="w-6 h-px bg-amber-500"></span>
+          <div className="animate-hero flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-amber-700 font-bold">
+            <span className="w-6 h-px bg-amber-600"></span>
             <span>{t('Get in Touch', 'सम्पर्क')}</span>
           </div>
           <h1
@@ -123,7 +123,7 @@ export const ContactPage: React.FC = () => {
             {t('Contact Hazaridevi Duck Farm', 'हजारीदेवी डक फार्मलाई सम्पर्क गर्नुहोस्')}
           </h1>
           <p
-            className="animate-hero text-sm sm:text-base text-zinc-200 max-w-2xl leading-relaxed"
+            className="animate-hero text-sm sm:text-base text-zinc-700 max-w-2xl leading-relaxed"
             style={{ '--hero-delay': '240ms' } as React.CSSProperties}
           >
             {t(

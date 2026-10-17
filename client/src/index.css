@@ -206,6 +206,14 @@ html.theme-transition *::after {
   animation-delay: var(--hero-delay, 0ms);
 }
 
+/* Cart badge pops when an item is added (re-keyed on change in Navbar) */
+@keyframes cart-bump {
+  0%   { transform: scale(0.4); }
+  55%  { transform: scale(1.3); }
+  100% { transform: scale(1); }
+}
+.animate-cart-bump { animation: cart-bump 0.45s cubic-bezier(0.3, 1.5, 0.6, 1) both; }
+
 /* Gentle floating for decorative badges */
 @keyframes float-y {
   0%, 100% { transform: translateY(0); }
@@ -239,6 +247,7 @@ html.theme-transition *::after {
     transition: none;
   }
   .animate-fetch-in,
+  .animate-cart-bump,
   .animate-hero,
   .animate-float,
   .skeleton {

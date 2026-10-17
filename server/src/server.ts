@@ -17,6 +17,7 @@ import {
   sendContactAckEmail
 } from './services/emailService';
 import { sendAdminSms, smsConfigured } from './services/smsService';
+import { sendAdminWhatsApp, whatsappConfigured } from './services/whatsappService';
 
 
 const prisma = new PrismaClient();
@@ -375,8 +376,21 @@ app.post('/api/orders', publicWriteLimiter, async (req: Request, res: Response) 
       totalAmount: created.reduce((sum, o) => sum + o.totalPrice, 0)
     };
 
-    // Emails go out in the background so a slow mail server never blocks the checkout
-    Promise.allSettled([sendOrderConfirmationEmail(emailPayload), sendNewOrderAdminEmail(emailPayload)])
+    // The order slip customers used to send by hand now reaches the farm's WhatsApp automatically
+    const whatsappSlip = [
+      `New website order ${orderRef}`,
+      `Customer: ${data.customerName} (${data.phone})${customerEmail ? `, ${customerEmail}` : ''}`,
+      `Items: ${emailPayload.items.map((i) => `${i.productName} x${i.quantity}`).join('; ')}`,
+      `Total: Rs. ${emailPayload.totalAmount.toLocaleString('en-IN')} via ${data.paymentMethod.toUpperCase()} (txn ${transactionId})`,
+      `Deliver to: ${data.addressText}`
+    ].join('\n');
+
+    // Notifications go out in the background so a slow mail/WhatsApp server never blocks the checkout
+    Promise.allSettled([
+      sendOrderConfirmationEmail(emailPayload),
+      sendNewOrderAdminEmail(emailPayload),
+      sendAdminWhatsApp(whatsappSlip)
+    ])
       .then((results) => results.forEach((r) => {
         if (r.status === 'rejected') console.error(`Order ${orderRef} email failed:`, r.reason?.message || r.reason);
       }));
@@ -464,7 +478,7 @@ app.post('/api/contact', contactLimiter, async (req: Request, res: Response) => 
 
     // Notifications run in the background; the message is already safely saved
     const sms = `Hazaridevi website msg ${ref}\nFrom: ${data.fullName}${data.phone ? ` (${data.phone})` : ''}\nEmail: ${data.email}\nRe: ${data.subject}\n${data.message.replace(/\s+/g, ' ').slice(0, 140)}`;
-    Promise.allSettled([sendContactAdminEmail(payload), sendAdminSms(sms), sendContactAckEmail(payload)])
+    Promise.allSettled([sendContactAdminEmail(payload), sendAdminSms(sms), sendContactAckEmail(payload), sendAdminWhatsApp(sms)])
       .then(([adminMail, , ackMail]) => {
         if (adminMail.status === 'rejected') console.error(`Contact ${ref}: admin email failed:`, adminMail.reason?.message);
         if (ackMail.status === 'rejected') console.error(`Contact ${ref}: customer email failed:`, ackMail.reason?.message);
@@ -817,6 +831,9 @@ app.listen(PORT, async () => {
   console.log(adminEmails.length
     ? `🔑 Admin access for: ${adminEmails.join(', ')} (log in on the normal Login page)`
     : '🔑 No ADMIN_EMAILS set in .env - nobody can open the admin dashboard');
+  console.log(whatsappConfigured()
+    ? '💬 WhatsApp alerts ready (Meta Cloud API)'
+    : '💬 WhatsApp alerts off - add WHATSAPP_CLOUD_TOKEN / WHATSAPP_PHONE_NUMBER_ID / WHATSAPP_ADMIN_TO to .env to enable');
   console.log(smsConfigured()
     ? '📱 SMS alerts ready (Sparrow SMS)'
     : '📱 SMS alerts off - add SPARROW_SMS_TOKEN / SPARROW_SMS_FROM to .env to enable');

@@ -1,14 +1,13 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Link, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { ProductCatalog } from './ProductCatalog';
 import { LanguageProvider, useLang } from './LanguageContext';
 import { ThemeProvider } from './ThemeContext';
 import { CartProvider } from './CartContext';
-import { AuthProvider } from './AuthContext';
+import { AuthProvider, useAuth } from './AuthContext';
 import { Navbar } from './Navbar';
 import { Footer } from './Footer';
 import { YouTubeVideos } from './YouTubeVideos';
-import { AdminLoginModal } from './AdminLoginModal';
 import { WhatsAppButton } from './WhatsAppButton';
 import { FarmVisitModal } from './FarmVisitModal';
 import { OrderTrackingModal } from './OrderTrackingModal';
@@ -286,39 +285,41 @@ const HomePage = ({ onOpenSellModal, onOpenVisitModal }: HomePageProps) => {
   );
 };
 
+/**
+ * /admin - only for logged-in accounts whose email is in ADMIN_EMAILS (server decides isAdmin).
+ * Not logged in -> login page (comes back here after). Logged in but not admin -> their account page.
+ * The server checks again on every admin API call, so hiding this page is not the only protection.
+ */
+const AdminRoute: React.FC = () => {
+  const { customer, loading } = useAuth();
+  const navigate = useNavigate();
+
+  if (loading) return <PageSkeleton />;
+  if (!customer) return <Navigate to="/login" replace state={{ from: '/admin' }} />;
+  if (!customer.isAdmin) return <Navigate to="/account" replace />;
+
+  return (
+    <Suspense fallback={<PageSkeleton />}>
+      <AdminDashboard onBackToHome={() => navigate('/')} />
+    </Suspense>
+  );
+};
+
 const MainAppLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
-  const [showLoginModal, setShowLoginModal] = useState(false);
   const [isVisitModalOpen, setIsVisitModalOpen] = useState(false);
   const [isTrackModalOpen, setIsTrackModalOpen] = useState(false);
   const [isSellModalOpen, setIsSellModalOpen] = useState(false);
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
-        e.preventDefault();
-        const token = localStorage.getItem('hz_admin_token');
-        if (token) setIsAdminLoggedIn(true);
-        else setShowLoginModal(true);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
-  useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [location.pathname]);
 
-  if (isAdminLoggedIn) {
-    return (
-      <Suspense fallback={<PageSkeleton />}>
-        <AdminDashboard onBackToHome={() => setIsAdminLoggedIn(false)} />
-      </Suspense>
-    );
+  // The admin dashboard is a full-screen page with its own header (no site navbar/footer)
+  if (location.pathname === '/admin' || location.pathname.startsWith('/admin/')) {
+    return <AdminRoute />;
   }
 
   return (
@@ -378,15 +379,6 @@ const MainAppLayout: React.FC = () => {
       <FarmVisitModal isOpen={isVisitModalOpen} onClose={() => setIsVisitModalOpen(false)} />
       <OrderTrackingModal isOpen={isTrackModalOpen} onClose={() => setIsTrackModalOpen(false)} />
       <SellProductModal isOpen={isSellModalOpen} onClose={() => setIsSellModalOpen(false)} />
-      {showLoginModal && (
-        <AdminLoginModal
-          onSuccess={() => {
-            setShowLoginModal(false);
-            setIsAdminLoggedIn(true);
-          }}
-          onClose={() => setShowLoginModal(false)}
-        />
-      )}
     </div>
   );
 };

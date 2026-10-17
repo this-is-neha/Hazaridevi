@@ -1,15 +1,13 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import 'dotenv/config'; // must load before modules that read process.env at import time
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { PrismaClient } from '@prisma/client';
 import axios from 'axios';
 import crypto from 'crypto';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import { createAuthRouter, getCustomerFromRequest } from './routes/auth';
+import { createAuthRouter, getCustomerFromRequest, requireAdmin } from './routes/auth';
 import {
   sendDispatchSlipEmail,
   sendOrderConfirmationEmail,
@@ -85,15 +83,6 @@ app.use('/api', rateLimit({
   legacyHeaders: false,
   message: tooManyRequests
 }));
-// Admin login: stop password guessing (only failed attempts count)
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 8,
-  skipSuccessfulRequests: true,
-  standardHeaders: 'draft-8',
-  legacyHeaders: false,
-  message: { success: false, message: 'Too many failed login attempts. Try again in 15 minutes.' }
-});
 // Public forms & payment initiation: stop spam/bot submissions
 const publicWriteLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
@@ -166,29 +155,8 @@ const productValidationSchema = z.object({
 });
 
 // --- 2. AUTHENTICATION MIDDLEWARE ---
-interface AuthenticatedRequest extends Request {
-  adminUser?: { id: number; username: string };
-}
-
-const verifyAdminToken = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ success: false, message: 'Access Denied: Please log in to Admin Panel' });
-  }
-
-  const token = authHeader.split(' ')[1];
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: number; username: string; role?: string };
-    // Customer tokens are signed with the same secret - they must never open admin routes
-    if (decoded.role !== 'admin') {
-      return res.status(403).json({ success: false, message: 'Admin access required. Please log in to the Admin Panel.' });
-    }
-    req.adminUser = { id: decoded.id, username: decoded.username };
-    next();
-  } catch {
-    return res.status(403).json({ success: false, message: 'Session expired. Please log in again.' });
-  }
-};
+// Admin = a logged-in, verified account whose email is listed in ADMIN_EMAILS (see routes/auth.ts)
+const verifyAdminToken = requireAdmin(prisma, JWT_SECRET);
 
 // --- 3. PAYMENT GATEWAY INTEGRATIONS ---
 // Payment redirects always go back to our own site, never to a caller-supplied Origin
@@ -545,40 +513,6 @@ app.use('/api/auth', createAuthRouter({
   })
 }));
 
-// --- 5. ADMIN AUTHENTICATION ---
-const loginSchema = z.object({
-  username: z.string().trim().min(1).max(64),
-  password: z.string().min(1).max(128)
-});
-// Compared against when the username doesn't exist, so response time doesn't reveal valid usernames
-const DUMMY_HASH = bcrypt.hashSync('timing-equaliser', 10);
-
-app.post('/api/admin/login', loginLimiter, async (req: Request, res: Response) => {
-  try {
-    const parsed = loginSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ success: false, message: 'Username and password are required' });
-    }
-    const { username, password } = parsed.data;
-    const admin = await prisma.adminUser.findUnique({ where: { username } });
-
-    if (!admin) {
-      await bcrypt.compare(password, DUMMY_HASH);
-      return res.status(401).json({ success: false, message: 'Invalid Username or Password' });
-    }
-
-    const isMatch = await bcrypt.compare(password, admin.passwordHash);
-    if (!isMatch) {
-      return res.status(401).json({ success: false, message: 'Invalid Username or Password' });
-    }
-
-    const token = jwt.sign({ id: admin.id, username: admin.username, role: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
-    return res.json({ success: true, token, username: admin.username });
-  } catch (error) {
-    return res.status(500).json({ success: false, error: (error as Error).message });
-  }
-});
-
 // --- 6. PROTECTED ADMIN ROUTES: ORDERS & EMAIL DISPATCH ---
 app.get('/api/admin/orders', verifyAdminToken, async (_req: Request, res: Response) => {
   try {
@@ -808,22 +742,6 @@ app.delete('/api/admin/products/:id', verifyAdminToken, async (req: Request, res
 });
 
 // --- 9. INITIAL BOOTSTRAP ---
-const createInitialAdmin = async () => {
-  const existingAdmin = await prisma.adminUser.findUnique({ where: { username: 'admin' } });
-  if (!existingAdmin) {
-    // Never ship a known default password: take it from .env, or generate a random one
-    const fromEnv = process.env.ADMIN_INITIAL_PASSWORD || '';
-    const password = fromEnv.length >= 10 ? fromEnv : crypto.randomBytes(12).toString('base64url');
-    const hash = await bcrypt.hash(password, 12);
-    await prisma.adminUser.create({
-      data: { username: 'admin', passwordHash: hash }
-    });
-    console.log(fromEnv.length >= 10
-      ? '👤 Admin account created (username: admin) with ADMIN_INITIAL_PASSWORD from .env.'
-      : `👤 Admin account created. Username: admin | One-time password: ${password}\n   Change it now: npm run admin:password -- <new-password>`);
-  }
-};
-
 const seedInitialProducts = async () => {
   try {
     const count = await (prisma as any).product.count();
@@ -893,9 +811,12 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 
 app.listen(PORT, async () => {
   console.log(`🚀 SQL Server running on http://localhost:${PORT}`);
-  await createInitialAdmin();
   await seedInitialProducts();
   await verifyEmailTransport();
+  const adminEmails = (process.env.ADMIN_EMAILS || '').split(',').map((e) => e.trim()).filter(Boolean);
+  console.log(adminEmails.length
+    ? `🔑 Admin access for: ${adminEmails.join(', ')} (log in on the normal Login page)`
+    : '🔑 No ADMIN_EMAILS set in .env - nobody can open the admin dashboard');
   console.log(smsConfigured()
     ? '📱 SMS alerts ready (Sparrow SMS)'
     : '📱 SMS alerts off - add SPARROW_SMS_TOKEN / SPARROW_SMS_FROM to .env to enable');

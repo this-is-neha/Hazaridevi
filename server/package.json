@@ -7,8 +7,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "postinstall": "prisma skills sync || exit 0",
-    "admin:password": "tsx src/scripts/setAdminPassword.ts"
+    "postinstall": "prisma skills sync || exit 0"
   },
   "keywords": [],
   "author": "",

@@ -170,7 +170,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             {/* Account / Login */}
             <Link
-              to={customer ? '/account' : '/login'}
+              to={customer?.isAdmin ? '/admin' : customer ? '/account' : '/login'}
               onClick={closeMenu}
               title={customer ? (lang === 'ne' ? 'मेरो खाता' : 'My Account') : (lang === 'ne' ? 'लगइन' : 'Log in')}
               className={`h-10 inline-flex items-center gap-2 rounded-full border px-2.5 sm:px-3.5 text-xs font-bold transition ${
@@ -231,14 +231,16 @@ export const Navbar: React.FC<NavbarProps> = ({
             
             <div className="pt-3 flex flex-col gap-2.5">
               <Link
-                to={customer ? '/account' : '/login'}
+                to={customer?.isAdmin ? '/admin' : customer ? '/account' : '/login'}
                 onClick={closeMenu}
                 className="w-full text-left py-2 text-white hover:text-amber-300 font-bold border-b border-emerald-900/60 flex items-center gap-2"
               >
                 {customer ? <User size={15} /> : <LogIn size={15} />}
                 <span>
                   {customer
-                    ? `${lang === 'ne' ? 'मेरो खाता' : 'My Account'} (${firstName})`
+                    ? (customer.isAdmin
+                      ? (lang === 'ne' ? 'एडमिन ड्यासबोर्ड' : 'Admin Dashboard')
+                      : `${lang === 'ne' ? 'मेरो खाता' : 'My Account'} (${firstName})`)
                     : (lang === 'ne' ? 'लगइन / खाता खोल्नुहोस्' : 'Log in / Register')}
                 </span>
               </Link>

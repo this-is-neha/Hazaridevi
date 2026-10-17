@@ -173,7 +173,7 @@ export const LoginPage: React.FC = () => {
   const [error, setError] = useState('');
   const [needsVerify, setNeedsVerify] = useState(false);
 
-  if (customer) return <Navigate to={from} replace />;
+  if (customer) return <Navigate to={customer.isAdmin ? '/admin' : from} replace />;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -183,7 +183,8 @@ export const LoginPage: React.FC = () => {
     const res = await login(email.trim(), password);
     setBusy(false);
     if (res.ok) {
-      navigate(from, { replace: true });
+      // Same login page for everyone: admin emails go straight to the dashboard
+      navigate(res.data.customer?.isAdmin ? '/admin' : from, { replace: true });
     } else {
       setNeedsVerify(res.data.code === 'EMAIL_NOT_VERIFIED');
       setError(res.data.message || t('Login failed', 'लगइन असफल भयो'));
@@ -516,58 +517,66 @@ const statusStyle = (status: string) => {
   return 'bg-zinc-100 text-zinc-700 border-zinc-300';
 };
 
-const ChangePasswordForm: React.FC = () => {
+/**
+ * Password changes are only possible through an emailed link (no "current password" form),
+ * so someone using an unlocked, logged-in device can't change the password on their own.
+ */
+const RequestPasswordChange: React.FC<{ email: string }> = ({ email }) => {
   const t = useT();
-  const { token, replaceToken } = useAuth();
-  const [current, setCurrent] = useState('');
-  const [next, setNext] = useState('');
-  const [confirm, setConfirm] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const send = async () => {
+    setState('sending');
     setError('');
-    setSuccess('');
-    if (!passwordValid(next)) return setError(t('New password does not meet the rules.', 'नयाँ पासवर्ड नियम अनुसार छैन।'));
-    if (next !== confirm) return setError(t('New passwords do not match.', 'नयाँ पासवर्ड मेल खाएनन्।'));
-    setBusy(true);
-    const res = await apiRequest<{ token: string }>('/api/auth/change-password', {
-      body: { currentPassword: current, newPassword: next },
-      token
-    });
-    setBusy(false);
-    if (res.ok) {
-      replaceToken(res.data.token);
-      setCurrent('');
-      setNext('');
-      setConfirm('');
-      setSuccess(t(
-        'Password changed. A confirmation email has been sent, and other devices were logged out.',
-        'पासवर्ड परिवर्तन भयो। पुष्टि इमेल पठाइयो र अन्य डिभाइसबाट लगआउट गरियो।'
-      ));
-    } else {
-      setError(res.data.message || t('Could not change password', 'पासवर्ड परिवर्तन हुन सकेन'));
+    const res = await apiRequest('/api/auth/forgot-password', { body: { email } });
+    if (res.ok) setState('sent');
+    else {
+      setState('error');
+      setError(res.data.message || t('Could not send the email. Please try again.', 'इमेल पठाउन सकिएन। फेरि प्रयास गर्नुहोस्।'));
     }
   };
 
+  if (state === 'sent') {
+    return (
+      <div className="space-y-3">
+        <Alert kind="success">
+          {t('We emailed a password change link to ', 'पासवर्ड परिवर्तन गर्ने लिंक यो इमेलमा पठाइयो: ')}
+          <strong className="break-all">{email}</strong>
+          {t('. Open it within 1 hour to set your new password.', '। नयाँ पासवर्ड राख्न १ घण्टाभित्र लिंक खोल्नुहोस्।')}
+        </Alert>
+        <p className="text-xs text-zinc-600">
+          {t(
+            "Can't find it? Check your spam folder. After the change you'll be logged out everywhere and can log in with the new password.",
+            'भेटिएन? स्प्याम फोल्डर हेर्नुहोस्। परिवर्तनपछि सबै डिभाइसबाट लगआउट हुनेछ, नयाँ पासवर्डले लगइन गर्नुहोस्।'
+          )}
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <form onSubmit={submit} className="space-y-4">
-      {error && <Alert kind="error">{error}</Alert>}
-      {success && <Alert kind="success">{success}</Alert>}
-      <Field label={t('Current Password', 'हालको पासवर्ड')} icon={<Lock size={16} />}>
-        <PasswordInput value={current} onChange={setCurrent} autoComplete="current-password" />
-      </Field>
-      <Field label={t('New Password', 'नयाँ पासवर्ड')} icon={<KeyRound size={16} />}>
-        <PasswordInput value={next} onChange={setNext} autoComplete="new-password" />
-      </Field>
-      <PasswordRules password={next} />
-      <Field label={t('Confirm New Password', 'नयाँ पासवर्ड पुष्टि')} icon={<KeyRound size={16} />}>
-        <PasswordInput value={confirm} onChange={setConfirm} autoComplete="new-password" />
-      </Field>
-      <SubmitButton busy={busy}>{t('Change Password', 'पासवर्ड परिवर्तन')}</SubmitButton>
-    </form>
+    <div className="space-y-4">
+      {state === 'error' && <Alert kind="error">{error}</Alert>}
+      <p className="text-sm text-zinc-700 leading-relaxed">
+        {t(
+          'For your security, passwords can only be changed through a link sent to your email address:',
+          'सुरक्षाका लागि पासवर्ड तपाईंको इमेलमा पठाइएको लिंकबाट मात्र परिवर्तन गर्न सकिन्छ:'
+        )}
+      </p>
+      <p className="text-sm font-bold text-zinc-950 break-all flex items-center gap-2">
+        <Mail size={15} className="text-emerald-800 shrink-0" /> {email}
+      </p>
+      <button
+        type="button"
+        onClick={send}
+        disabled={state === 'sending'}
+        className="w-full py-3.5 bg-amber-400 hover:bg-amber-300 disabled:opacity-60 disabled:cursor-wait active:scale-[0.99] text-zinc-950 font-black text-sm uppercase tracking-wider rounded-xs shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
+      >
+        {state === 'sending' ? <Loader2 size={17} className="animate-spin" /> : <MailCheck size={17} />}
+        {state === 'sending' ? t('Sending…', 'पठाउँदै…') : t('Email Me a Change Link', 'परिवर्तन लिंक इमेल गर्नुहोस्')}
+      </button>
+    </div>
   );
 };
 
@@ -604,6 +613,16 @@ export const AccountPage: React.FC = () => {
           <LogOut size={15} /> {t('Log Out', 'लगआउट')}
         </button>
       </div>
+
+      {customer.isAdmin && (
+        <Link
+          to="/admin"
+          className="flex items-center justify-between gap-3 bg-amber-400 hover:bg-amber-300 text-zinc-950 font-black text-sm uppercase tracking-wider px-6 py-4 rounded-xs shadow-md transition"
+        >
+          <span className="flex items-center gap-2"><ShieldCheck size={18} /> {t('Open Admin Dashboard', 'एडमिन ड्यासबोर्ड खोल्नुहोस्')}</span>
+          <span aria-hidden="true">→</span>
+        </Link>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
         {/* Orders */}
@@ -660,7 +679,7 @@ export const AccountPage: React.FC = () => {
           <h2 className="flex items-center gap-2 text-lg font-serif font-black text-zinc-950 border-b border-zinc-200 pb-3 mb-4">
             <KeyRound size={18} className="text-emerald-800" /> {t('Change Password', 'पासवर्ड परिवर्तन')}
           </h2>
-          <ChangePasswordForm />
+          <RequestPasswordChange email={customer.email} />
         </section>
       </div>
     </div>

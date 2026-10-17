@@ -14,7 +14,8 @@ import {
  * Customer accounts:
  *   register -> verification email -> click link -> verified -> login
  *   forgot password -> reset email -> set new password -> "password changed" email
- *   logged-in change password -> "password changed" email
+ *   (no "change with current password" route: every password change must go through an
+ *    emailed link, so someone with access to an unlocked session can't change it)
  */
 
 const VERIFY_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -50,16 +51,29 @@ const loginSchema = z.object({ email, password: z.string().min(1).max(128) });
 const emailOnlySchema = z.object({ email });
 const tokenSchema = z.object({ token: z.string().regex(/^[a-f0-9]{64}$/, 'Invalid or expired link') });
 const resetSchema = z.object({ token: tokenSchema.shape.token, password });
-const changeSchema = z.object({ currentPassword: z.string().min(1).max(128), newPassword: password });
 
 const firstIssue = (err: z.ZodError) => err.issues[0]?.message || 'Invalid input';
 const sha256 = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
+
+/**
+ * Admin access is decided ONLY by email: an account whose (verified) email is listed in
+ * ADMIN_EMAILS in .env gets the admin dashboard. Everyone else is a normal customer.
+ * Read on every call, so editing .env + restarting is all it takes to add/remove an admin.
+ */
+export const isAdminEmail = (email: string) =>
+  (process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean)
+    .includes(email.trim().toLowerCase());
+
 const publicCustomer = (c: Customer) => ({
   id: c.id,
   fullName: c.fullName,
   email: c.email,
   phone: c.phone,
   emailVerified: c.emailVerified,
+  isAdmin: isAdminEmail(c.email),
   createdAt: c.createdAt
 });
 
@@ -119,7 +133,16 @@ export function createAuthRouter(opts: {
         ? await prisma.customer.update({ where: { id: existing.id }, data: { fullName, phone: phone || null, passwordHash } })
         : await prisma.customer.create({ data: { fullName, email: addr, phone: phone || null, passwordHash } });
 
-      await sendVerification(customer);
+      try {
+        await sendVerification(customer);
+      } catch (mailErr) {
+        // The account is saved; only the email failed. Registering again (or "resend") retries it.
+        console.error('Verification email failed:', (mailErr as Error).message);
+        return res.status(503).json({
+          success: false,
+          message: "Your account was saved, but we couldn't send the verification email right now. Please try again in a few minutes, or contact us."
+        });
+      }
       return res.status(201).json({
         success: true,
         message: 'Account created. Check your email and click the verification link to activate it.'
@@ -233,29 +256,6 @@ export function createAuthRouter(opts: {
     return res.json({ success: true, customer: publicCustomer(req.customer!) });
   });
 
-  router.post('/change-password', requireCustomer(prisma, jwtSecret), async (req: CustomerRequest, res: Response) => {
-    const parsed = changeSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ success: false, message: firstIssue(parsed.error) });
-    const customer = req.customer!;
-
-    if (!(await bcrypt.compare(parsed.data.currentPassword, customer.passwordHash))) {
-      return res.status(400).json({ success: false, message: 'Current password is incorrect' });
-    }
-    if (parsed.data.currentPassword === parsed.data.newPassword) {
-      return res.status(400).json({ success: false, message: 'New password must be different from the current one' });
-    }
-
-    const updated = await prisma.customer.update({
-      where: { id: customer.id },
-      data: { passwordHash: await bcrypt.hash(parsed.data.newPassword, 12), passwordChangedAt: new Date() }
-    });
-
-    sendPasswordChangedEmail(updated.email, updated.fullName)
-      .catch((e) => console.error('Password-changed email failed:', e));
-    // Old tokens are now invalid, so hand back a fresh one to keep this device logged in
-    return res.json({ success: true, message: 'Password changed successfully.', token: signCustomerToken(updated) });
-  });
-
   router.get('/my-orders', requireCustomer(prisma, jwtSecret), async (req: CustomerRequest, res: Response) => {
     const orders = await prisma.order.findMany({
       where: { customerId: req.customer!.id },
@@ -287,6 +287,25 @@ export async function getCustomerFromRequest(req: Request, prisma: PrismaClient,
   } catch {
     return null;
   }
+}
+
+/**
+ * Middleware for admin routes: a valid login whose email is in ADMIN_EMAILS.
+ * Checked against the database on every request, so removing an email from the list
+ * or changing the password cuts access off immediately.
+ */
+export function requireAdmin(prisma: PrismaClient, jwtSecret: string) {
+  return async (req: CustomerRequest, res: Response, next: NextFunction) => {
+    const customer = await getCustomerFromRequest(req, prisma, jwtSecret);
+    if (!customer) {
+      return res.status(401).json({ success: false, message: 'Please log in again.' });
+    }
+    if (!isAdminEmail(customer.email)) {
+      return res.status(403).json({ success: false, message: 'Admin access required.' });
+    }
+    req.customer = customer;
+    next();
+  };
 }
 
 /** Middleware: request must carry a valid customer token. */

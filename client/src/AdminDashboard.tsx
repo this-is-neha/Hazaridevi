@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { API_BASE_URL } from './config';
+import { useAuth } from './AuthContext';
 import { 
   Package, Settings, RefreshCw, LogOut, ExternalLink, 
   Phone, MessageSquare, Clock, 
@@ -221,6 +222,7 @@ const DEFAULT_CATALOG_PRODUCTS: ProductItem[] = [
 ];
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) => {
+  const { logout } = useAuth();
   const [orders, setOrders] = useState<OrderItem[]>([]);
   const [visits, setVisits] = useState<VisitItem[]>([]);
   const [products, setProducts] = useState<ProductItem[]>([]);
@@ -331,7 +333,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
 
   const fetchDashboardData = async () => {
     setLoading(true);
-    const token = localStorage.getItem('hz_admin_token');
+    const token = localStorage.getItem('hz_customer_token');
     const API_BASE_URL = getApiBaseUrl();
 
     try {
@@ -498,7 +500,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
 
   const handleStatusChange = async (orderId: string, newStatus: string) => {
     setUpdatingId(orderId);
-    const token = localStorage.getItem('hz_admin_token');
+    const token = localStorage.getItem('hz_customer_token');
     const API_BASE_URL = getApiBaseUrl();
     try {
       const res = await fetch(`${API_BASE_URL}/api/admin/orders/${orderId}/status`, {
@@ -549,7 +551,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
       localStorage.setItem('hz_dispatches', JSON.stringify(savedDispatches));
     }
 
-    const token = localStorage.getItem('hz_admin_token');
+    const token = localStorage.getItem('hz_customer_token');
     const API_BASE_URL = getApiBaseUrl();
     try {
       await fetch(`${API_BASE_URL}/api/admin/orders/${orderId}`, {
@@ -588,7 +590,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
     setVisits(updatedVisits);
     localStorage.setItem('hz_farm_visits', JSON.stringify(updatedVisits));
 
-    const token = localStorage.getItem('hz_admin_token');
+    const token = localStorage.getItem('hz_customer_token');
     const API_BASE_URL = getApiBaseUrl();
     try {
       await fetch(`${API_BASE_URL}/api/admin/visits/${visitId}`, {
@@ -619,7 +621,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
     }
 
     const orderId = (dispatchOrder.id || dispatchOrder._id) as string;
-    const token = localStorage.getItem('hz_admin_token');
+    const token = localStorage.getItem('hz_customer_token');
     const API_BASE_URL = getApiBaseUrl();
 
     setIsSendingEmail(true);
@@ -661,7 +663,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
     if (!dispatchOrder) return;
 
     const orderId = (dispatchOrder.id || dispatchOrder._id) as string;
-    const token = localStorage.getItem('hz_admin_token');
+    const token = localStorage.getItem('hz_customer_token');
     const API_BASE_URL = getApiBaseUrl();
     setIsSavingDispatch(true);
 
@@ -822,7 +824,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
   };
 
   const handleToggleStock = async (product: ProductItem) => {
-    const token = localStorage.getItem('hz_admin_token');
+    const token = localStorage.getItem('hz_customer_token');
     const API_BASE_URL = getApiBaseUrl();
     const newStockState = !product.inStock;
 
@@ -849,7 +851,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
       : 'Are you sure you want to delete this product?';
     if (!window.confirm(confirmMsg)) return;
 
-    const token = localStorage.getItem('hz_admin_token');
+    const token = localStorage.getItem('hz_customer_token');
     const API_BASE_URL = getApiBaseUrl();
 
     const updated = products.filter(p => String(p.id) !== String(id));
@@ -867,7 +869,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
 
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    const token = localStorage.getItem('hz_admin_token');
+    const token = localStorage.getItem('hz_customer_token');
     const API_BASE_URL = getApiBaseUrl();
 
     const priceNum = Number(formPrice);
@@ -972,7 +974,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('hz_admin_token');
+    logout();
     window.location.hash = '';
     onBackToHome();
   };

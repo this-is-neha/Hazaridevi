@@ -7,6 +7,8 @@ export interface Customer {
   email: string;
   phone: string | null;
   emailVerified: boolean;
+  /** true when the email is in ADMIN_EMAILS on the server */
+  isAdmin?: boolean;
   createdAt: string;
 }
 

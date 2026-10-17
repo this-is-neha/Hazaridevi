@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en" class="scroll-smooth">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    
+    <!-- Responsive Viewport for Mobile & Desktop -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
+
+    <!-- Title & Brand Identity (Clean English Browser Tab) -->
+    <title>Hazaridevi Duck Farm | Commercial Hatchery & Waterfowl Agro-Hub Nepal</title>
+    <meta name="description" content="Nepal's certified commercial waterfowl hatchery. High-yield Khaki Campbell ducklings, fresh eggs, and meat ducks with guaranteed safe delivery to all 7 provinces." />
+    <meta name="author" content="Ujjawal Kumar Sah" />
+
+    <!-- Standard Favicons -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate icon" href="/favicon.ico" />
+
+    <!-- Universal PWA Web App Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#1a3a2a" />
+
+    <!-- Apply saved / system theme before first paint (prevents a white flash in dark mode) -->
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem('hz_theme');
+          var dark = saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+          if (dark) document.documentElement.classList.add('dark');
+        } catch (e) {}
+      })();
+    </script>
+
+    <!-- Apple iOS / iPhone & iPad Native App Settings -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Hazaridevi Duck Farm" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+
+    <!-- Windows & Microsoft Edge / Surface Settings -->
+    <meta name="msapplication-TileColor" content="#18181b" />
+    <meta name="msapplication-TileImage" content="/favicon.svg" />
+    <meta name="application-name" content="Hazaridevi Duck Farm" />
+
+    <!-- Open Graph (WhatsApp, Facebook, Social Sharing Preview) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Hazaridevi Duck Farm | Commercial Duck Hatchery Nepal" />
+    <meta property="og:description" content="Khaki Campbell ducklings laying 300+ eggs annually, fresh fertile eggs, and live meat ducks shipped across Nepal." />
+    <meta property="og:image" content="/favicon.svg" />
+
+    <!-- Google Fonts: Mukta (Crisp Devanagari/Nepali) & Newsreader (Clean Editorial Serif) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Mukta:wght@400;500;600;700;800&family=Newsreader:ital,opsz,wght@0,6..72,400..800;1,6..72,400..800&display=swap" rel="stylesheet" />
+  </head>
+  <body class="antialiased selection:bg-amber-400 selection:text-zinc-950 min-h-screen">
+    <noscript>
+      <div style="padding: 20px; text-align: center; font-family: sans-serif; background-color: #fef2f2; color: #991b1b;">
+        Please enable JavaScript in your browser to view Hazaridevi Duck Farm properly.
+      </div>
+    </noscript>
+
+    <!-- React App Root Container -->
+    <div id="root"></div>
+
+    <!-- Entry Script -->
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

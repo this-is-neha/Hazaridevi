@@ -1,0 +1,247 @@
+@import "tailwindcss";
+/* Fonts (Mukta + Newsreader) are loaded by the <link> in index.html */
+
+/* One content width for the whole site: use `max-w-site`. Change it here only. */
+@theme {
+  --container-site: 88rem; /* 1408px */
+}
+
+/* Tailwind `dark:` utilities follow the .dark class on <html> (set by ThemeContext) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --farm-charcoal: #18181b;
+  --farm-surface: #ffffff;
+  --farm-page: #ffffff;
+  --farm-subtle: #f8fafc;
+  --farm-amber: #d97706;
+  --farm-amber-hover: #b45309;
+  --farm-border: #e2e8f0;
+  color-scheme: light;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--farm-page);
+  color: var(--color-zinc-900);
+  font-family: 'Mukta', system-ui, -apple-system, sans-serif !important;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Devanagari / Nepali typography enforcement */
+* {
+  font-family: 'Mukta', system-ui, sans-serif;
+}
+
+.font-serif {
+  font-family: 'Newsreader', 'Mukta', Georgia, serif;
+}
+
+/* ============================================================
+   DARK THEME
+   Existing components use plain zinc/white utilities, so instead of
+   adding dark: variants everywhere we remap the palette under .dark.
+   The zinc scale is inverted (text-zinc-900 becomes light text,
+   bg-zinc-50 becomes a dark surface) with a slight forest-green tint.
+   ============================================================ */
+.dark {
+  color-scheme: dark;
+  --farm-page: #0b100d;
+  --farm-surface: #121a16;
+  --farm-border: #2a332e;
+}
+
+/* Inverted zinc scale. Also re-applied on white cards so a card placed inside an
+   always-dark panel (which restores the light palette below) still gets dark-mode text. */
+.dark,
+.dark .bg-white {
+  --color-zinc-50: #141a17;
+  --color-zinc-100: #1b221e;
+  --color-zinc-200: #2a332e;
+  --color-zinc-300: #3a443e;
+  --color-zinc-400: #6b746f;
+  --color-zinc-500: #9aa39e;
+  --color-zinc-600: #b4bcb7;
+  --color-zinc-700: #cdd3cf;
+  --color-zinc-800: #e1e6e3;
+  --color-zinc-900: #eef1ef;
+  --color-zinc-950: #f7f9f8;
+
+  /* Pale tints used for badges/alerts become deep translucent tints */
+  --color-emerald-50: #0f2a1f;
+  --color-emerald-100: #123527;
+  --color-amber-50: #2a210d;
+  --color-amber-100: #3a2c0f;
+  --color-red-50: #2d1414;
+  --color-red-100: #3b1717;
+}
+
+/* White surfaces -> dark cards */
+.dark .bg-white { background-color: var(--farm-surface); }
+
+/* Solid near-black backgrounds keep white text readable */
+.dark .bg-zinc-800,
+.dark .bg-zinc-900,
+.dark .bg-zinc-950 { background-color: #1f2a24; }
+
+/* Panels that are dark green / near-black in BOTH themes (navbar, hero, cart bar,
+   footer, modal headers...) keep the original palette, so their light-grey text
+   (text-zinc-100/200/300) stays light instead of being inverted to dark grey.
+   [class~="..."] matches the exact class only - not hover:/selection: variants. */
+.dark :is(
+  [class~="bg-[#1a3a2a]"], [class~="bg-[#1a3a2a]/90"],
+  [class~="bg-[#12271c]"], [class~="bg-[#12281d]/95"],
+  [class~="bg-[#0d1e15]"],
+  [class~="bg-[#18181b]"], [class~="bg-[#18181b]/95"],
+  [class~="bg-zinc-900"], [class~="bg-zinc-900/90"]
+) {
+  --color-zinc-50: #fafafa;
+  --color-zinc-100: #f4f4f5;
+  --color-zinc-200: #e4e4e7;
+  --color-zinc-300: #d4d4d8;
+  --color-zinc-400: #a1a1aa;
+  --color-zinc-500: #71717a;
+  --color-zinc-600: #52525b;
+  --color-zinc-700: #3f3f46;
+  --color-zinc-800: #27272a;
+  --color-zinc-900: #18181b;
+  --color-zinc-950: #09090b;
+}
+
+/* Amber/yellow buttons keep their dark text in both themes (exact classes only:
+   a wildcard here once matched "selection:bg-amber-400" on the page wrapper
+   and turned every heading on the site dark). */
+.dark :is(
+  [class~="bg-amber-300"], [class~="bg-amber-400"],
+  [class~="bg-amber-500"], [class~="bg-amber-600"],
+  [class~="bg-yellow-400"]
+) {
+  --color-zinc-800: #27272a;
+  --color-zinc-900: #18181b;
+  --color-zinc-950: #09090b;
+}
+
+/* Dark brand-coloured text would vanish on dark surfaces */
+.dark .text-emerald-700,
+.dark .text-emerald-800,
+.dark .text-emerald-900,
+.dark .text-emerald-950 { color: #6ee7b7; }
+.dark .text-amber-600,
+.dark .text-amber-700,
+.dark .text-amber-800,
+.dark .text-amber-900 { color: #fbbf24; }
+.dark .text-red-600,
+.dark .text-red-700,
+.dark .text-red-800,
+.dark .text-red-900 { color: #f87171; }
+.dark .border-emerald-300,
+.dark .border-emerald-400 { border-color: #1f6b4f; }
+
+/* Smooth colour fade only while switching themes (added briefly by ThemeContext) */
+html.theme-transition,
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition: background-color 0.35s ease, border-color 0.35s ease, color 0.35s ease !important;
+}
+
+/* ============================================================
+   SCROLL & LOADING ANIMATIONS
+   ============================================================ */
+
+/* Elements fade/slide in when they scroll into view (see Reveal.tsx) */
+.reveal {
+  opacity: 0;
+  transform: translate3d(0, 28px, 0);
+  transition:
+    opacity 0.7s cubic-bezier(0.2, 0.7, 0.2, 1),
+    transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1);
+  transition-delay: var(--reveal-delay, 0ms);
+  will-change: opacity, transform;
+}
+.reveal[data-variant="left"] { transform: translate3d(-36px, 0, 0); }
+.reveal[data-variant="right"] { transform: translate3d(36px, 0, 0); }
+.reveal[data-variant="zoom"] { transform: scale(0.94); }
+.reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* Product cards: content arrives like it was just fetched */
+@keyframes fetch-in {
+  from { opacity: 0; transform: translate3d(0, 18px, 0) scale(0.98); filter: blur(4px); }
+  to   { opacity: 1; transform: none; filter: blur(0); }
+}
+.animate-fetch-in {
+  animation: fetch-in 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+/* Skeleton shimmer placeholder */
+@keyframes shimmer {
+  0%   { background-position: -468px 0; }
+  100% { background-position: 468px 0; }
+}
+.skeleton {
+  background-color: var(--color-zinc-100);
+  background-image: linear-gradient(
+    90deg,
+    var(--color-zinc-100) 0px,
+    var(--color-zinc-200) 120px,
+    var(--color-zinc-100) 240px
+  );
+  background-size: 936px 100%;
+  background-repeat: no-repeat;
+  animation: shimmer 1.3s linear infinite;
+  border-radius: 2px;
+}
+
+/* Hero entrance on first load */
+@keyframes hero-rise {
+  from { opacity: 0; transform: translate3d(0, 22px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+.animate-hero {
+  animation: hero-rise 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation-delay: var(--hero-delay, 0ms);
+}
+
+/* Gentle floating for decorative badges */
+@keyframes float-y {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-8px); }
+}
+.animate-float { animation: float-y 5s ease-in-out infinite; }
+
+/* Custom Click Wiggle / Shake Animation */
+@keyframes wiggle {
+  0%, 100% { transform: rotate(0deg) scale(1); }
+  20% { transform: rotate(-6deg) scale(1.08); }
+  40% { transform: rotate(6deg) scale(1.08); }
+  60% { transform: rotate(-4deg) scale(1.04); }
+  80% { transform: rotate(4deg) scale(1.02); }
+}
+
+.animate-wiggle {
+  display: inline-block;
+}
+
+.animate-wiggle:active {
+  animation: wiggle 0.4s ease-in-out;
+}
+
+/* Respect users who turn off motion in their OS */
+@media (prefers-reduced-motion: reduce) {
+  .reveal,
+  .reveal[data-variant] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .animate-fetch-in,
+  .animate-hero,
+  .animate-float,
+  .skeleton {
+    animation: none;
+  }
+}

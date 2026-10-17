@@ -1,0 +1,127 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model AdminUser {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String
+  role         String   @default("ADMIN")
+  createdAt    DateTime @default(now())
+}
+
+model Order {
+  id                   Int      @id @default(autoincrement())
+  customerName         String
+  phone                String
+  customerEmail        String?
+  province             String?
+  district             String?
+  municipality         String?
+  busCounter           String?
+  addressText          String
+  latitude             Float?
+  longitude            Float?
+  mapUrl               String?
+  productName          String
+  quantity             Int
+  totalPrice           Float
+  paymentMethod        String   @default("esewa")
+  transactionId        String
+  receiptScreenshotUrl String?
+  status               String   @default("PENDING")
+  busNumber            String?
+  driverPhone          String?
+  biltyNumber          String?
+  estimatedArrival     String?
+  // Set when a logged-in customer places the order; guest checkouts leave it empty
+  customerId           Int?
+  customer             Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  createdAt            DateTime @default(now())
+
+  @@index([customerId])
+}
+
+// Website customer accounts (separate from AdminUser)
+model Customer {
+  id                Int         @id @default(autoincrement())
+  fullName          String
+  email             String      @unique // stored lower-case
+  phone             String?
+  passwordHash      String
+  emailVerified     Boolean     @default(false)
+  emailVerifiedAt   DateTime?
+  // Login tokens issued before this moment are rejected (logs out other devices after a password change)
+  passwordChangedAt DateTime?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  tokens            AuthToken[]
+  orders            Order[]
+}
+
+// One-time links sent by email. Only a SHA-256 hash of the token is stored.
+model AuthToken {
+  id         Int       @id @default(autoincrement())
+  customerId Int
+  customer   Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  type       String    // VERIFY_EMAIL | RESET_PASSWORD
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([customerId, type])
+}
+
+// Messages from the website Contact page (kept even if the email/SMS notification fails)
+model ContactMessage {
+  id        Int      @id @default(autoincrement())
+  fullName  String
+  email     String
+  phone     String?
+  subject   String
+  message   String
+  status    String   @default("NEW") // NEW | REPLIED | CLOSED
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model FarmVisit {
+  id           Int      @id @default(autoincrement())
+  fullName     String
+  phone        String
+  visitDate    String
+  visitorCount Int      @default(1)
+  purpose      String?
+  status       String   @default("PENDING")
+  createdAt    DateTime @default(now())
+}
+
+model Product {
+  id          Int      @id @default(autoincrement())
+  title       String
+  category    String   // ducklings, eggs, meat, feeds
+  badge       String?  // Best Seller, Low Mortality, Fresh Daily
+  description String
+  minOrder    String
+  price       Float
+  unit        String   // /duckling, /egg, /kg
+  imageUrl    String
+  inStock     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model SiteSettings {
+  id               Int      @id @default(autoincrement())
+  heroTitle        String   @default("हजारीदेवी डक फार्म")
+  heroSubtitle     String   @default("व्यावसायिक हाँस पालन तथा आधुनिक ह्याचरी")
+  paymentQrCodeUrl String   @default("")
+  youtubeVideoId   String   @default("kJQP7kiw5Fk")
+}

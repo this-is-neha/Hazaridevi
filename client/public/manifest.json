@@ -1,0 +1,26 @@
+{
+  "short_name": "Duck Farm",
+  "name": "हजारीदेवी डक फार्म (Hazaridevi Duck Farm)",
+  "description": "Commercial Duck Hatchery & Delivery Management",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ],
+  "start_url": "/",
+  "scope": "/",
+  "background_color": "#071a12",
+  "theme_color": "#071a12",
+  "display": "standalone",
+  "orientation": "any",
+  "categories": ["business", "shopping", "agriculture"],
+  "lang": "ne"
+}

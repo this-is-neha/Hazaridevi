@@ -1,0 +1,23 @@
+# --- Secrets: real env files stay on your machine only ---
+.env
+.env.*
+!.env.example
+
+# --- Local databases & data dumps (contain customer data + password hashes) ---
+*.db
+*.db-journal
+server/prisma/postgres_full.sql
+
+# --- Dependencies & build output ---
+node_modules/
+dist/
+dist-ssr/
+
+# --- Logs ---
+*.log
+npm-debug.log*
+
+# --- Editor / OS ---
+.idea/
+.DS_Store
+Thumbs.db

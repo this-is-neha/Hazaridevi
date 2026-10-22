@@ -96,6 +96,7 @@ model FarmVisit {
   id           Int      @id @default(autoincrement())
   fullName     String
   phone        String
+  email        String?
   visitDate    String
   visitorCount Int      @default(1)
   purpose      String?

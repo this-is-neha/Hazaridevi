@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLang } from './LanguageContext';
-import { API_BASE_URL, WHATSAPP_URL } from './config';
+import { useAuth } from './AuthContext';
+import { LoginRequired } from './LoginRequired';
+import { API_BASE_URL } from './config';
 import { X, Send, Calendar, Users, Phone, User, MessageSquare, CheckCircle2, Mail } from 'lucide-react';
 
 interface FarmVisitModalProps {
@@ -10,6 +12,7 @@ interface FarmVisitModalProps {
 
 export const FarmVisitModal: React.FC<FarmVisitModalProps> = ({ isOpen, onClose }) => {
   const { lang } = useLang();
+  const { customer, token } = useAuth();
   const [fullName, setFullName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
@@ -18,6 +21,14 @@ export const FarmVisitModal: React.FC<FarmVisitModalProps> = ({ isOpen, onClose 
   const [visitorCount, setVisitorCount] = useState('1');
   const [notes, setNotes] = useState('');
   const [submitted, setSubmitted] = useState(false);
+
+  // Logged-in customers don't need to retype their details
+  useEffect(() => {
+    if (!customer) return;
+    setFullName((v) => v || customer.fullName);
+    setCustomerEmail((v) => v || customer.email);
+    setPhoneNumber((v) => v || customer.phone || '');
+  }, [customer]);
 
   if (!isOpen) return null;
 
@@ -64,24 +75,14 @@ export const FarmVisitModal: React.FC<FarmVisitModalProps> = ({ isOpen, onClose 
     try {
       await fetch(`${API_BASE_URL}/api/visits`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify(newVisitItem)
       });
     } catch (err) {
       console.warn('Backend API offline, visit saved to synchronized local store.');
     }
 
-    const message = `🗓️ *नयाँ फार्म भिजिट अनुरोध (Farm Visit Booking)* 🗓️%0A%0A` +
-      `👤 *आगन्तुकको नाम:* ${encodeURIComponent(fullName)}%0A` +
-      `📞 *सम्पर्क फोन:* ${encodeURIComponent(phoneNumber)}%0A` +
-      `📧 *इमेल:* ${encodeURIComponent(customerEmail)}%0A` +
-      `📅 *भिजिट मिति:* ${encodeURIComponent(visitDate)}%0A` +
-      `🎯 *भिजिट उद्देश्य:* ${encodeURIComponent(typeLabel)}%0A` +
-      `👥 *मानिस संख्या:* ${encodeURIComponent(visitorCount)}%0A` +
-      `📝 *थप विवरण/नोट:* ${encodeURIComponent(notes || 'कुनै छैन')}`;
-
     setSubmitted(true);
-    window.open(`${WHATSAPP_URL}?text=${message}`, '_blank');
 
     setTimeout(() => {
       setSubmitted(false);
@@ -138,10 +139,12 @@ export const FarmVisitModal: React.FC<FarmVisitModalProps> = ({ isOpen, onClose 
             </h4>
             <p className="text-sm font-medium text-zinc-700 max-w-md mx-auto leading-relaxed">
               {lang === 'ne'
-                ? 'तपाईंको अनुरोध दर्ता भई इमेल र ह्वाट्सएपमा पठाइएको छ। हाम्रो प्रतिनिधिले छिट्टै समय कन्फर्म गर्नुहुनेछ।'
-                : 'Your booking has been registered and forwarded. Our farm representative will confirm your scheduled slot shortly.'}
+                ? 'तपाईंको अनुरोध दर्ता भयो र पुष्टिकरण इमेल तपाईंको इमेलमा पठाइएको छ। हाम्रो प्रतिनिधिले छिट्टै समय कन्फर्म गर्नुहुनेछ।'
+                : 'Your booking has been registered and a confirmation email is on its way to you. Our farm representative will confirm your scheduled slot shortly.'}
             </p>
           </div>
+        ) : !customer ? (
+          <LoginRequired actionEn="book a farm visit" actionNe="फार्म भिजिट बुक गर्न" onNavigate={handleResetAndClose} />
         ) : (
           /* FORM BODY */
           <form onSubmit={handleSubmit} className="p-6 sm:p-8 space-y-5 bg-white font-sans">

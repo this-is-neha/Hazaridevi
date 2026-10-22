@@ -4,6 +4,7 @@ import CryptoJS from 'crypto-js';
 import { useLang } from './LanguageContext';
 import { useCart } from './CartContext';
 import { useAuth, apiRequest } from './AuthContext';
+import { LoginRequired } from './LoginRequired';
 import { NEPAL_ADMIN_DATA } from './nepalData';
 import { API_BASE_URL } from './config';
 import {
@@ -52,7 +53,7 @@ export const OrderForm: React.FC = () => {
   const [copiedText, setCopiedText] = useState('');
 
   // Saving the order to the server
-  const { customer, token } = useAuth();
+  const { customer, token, loading: authLoading } = useAuth();
   const [placingOrder, setPlacingOrder] = useState(false);
   const [orderError, setOrderError] = useState('');
   const [placedOrder, setPlacedOrder] = useState<{ ref: string; total: number; txn: string } | null>(null);
@@ -339,6 +340,23 @@ export const OrderForm: React.FC = () => {
 
     window.open(bankCheckoutUrl, '_blank');
   };
+
+  // Browsing and the cart are open to everyone, but placing an order needs a login
+  if (authLoading) {
+    return <div className="bg-zinc-50/50 min-h-screen" />;
+  }
+  if (!customer) {
+    return (
+      <div className="bg-zinc-50/50 min-h-screen py-12 px-4">
+        <div className="max-w-xl mx-auto bg-white border border-emerald-900/30 rounded-md shadow-md overflow-hidden">
+          <div className="bg-[#1a3a2a] px-6 py-4 border-b-2 border-amber-500 text-amber-300 text-xs font-mono font-bold uppercase tracking-wider">
+            {lang === 'ne' ? 'अर्डर पूरा गर्नुहोस्' : 'Complete your order'}
+          </div>
+          <LoginRequired actionEn="place an order" actionNe="अर्डर गर्न" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-zinc-50/50 min-h-screen text-zinc-900 font-sans py-8">

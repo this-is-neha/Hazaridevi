@@ -42,10 +42,23 @@ interface OrderItem {
   createdAt: string;
 }
 
+interface MessageItem {
+  id: number;
+  ref: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  subject: string;
+  message: string;
+  status: string;
+  createdAt: string;
+}
+
 interface VisitItem {
   id: number | string;
   fullName: string;
   phone: string;
+  email?: string | null;
   visitDate: string;
   visitorCount: number;
   purpose?: string;
@@ -225,11 +238,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
   const { logout } = useAuth();
   const [orders, setOrders] = useState<OrderItem[]>([]);
   const [visits, setVisits] = useState<VisitItem[]>([]);
+  const [messages, setMessages] = useState<MessageItem[]>([]);
+  const [msgFilter, setMsgFilter] = useState<'ALL' | 'NEW' | 'REPLIED' | 'CLOSED'>('ALL');
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [farmerListings, setFarmerListings] = useState<FarmerListing[]>([]);
   const [loading, setLoading] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'orders' | 'history' | 'visits' | 'products' | 'farmer_sales' | 'settings'>('orders');
+  const [activeTab, setActiveTab] = useState<'orders' | 'history' | 'visits' | 'messages' | 'products' | 'farmer_sales' | 'settings'>('orders');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [adminLang, setAdminLang] = useState<'ne' | 'en'>('en');
@@ -243,7 +258,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
 
   const unreadVisitsCount = Math.max(0, (visits || []).filter(v => (v.status || 'Pending').toLowerCase() === 'pending').length - Math.min(lastViewedVisitsCount, (visits || []).filter(v => (v.status || 'Pending').toLowerCase() === 'pending').length));
 
-  const handleTabClick = (tab: 'orders' | 'history' | 'visits' | 'products' | 'farmer_sales' | 'settings') => {
+  const handleTabClick = (tab: 'orders' | 'history' | 'visits' | 'messages' | 'products' | 'farmer_sales' | 'settings') => {
     setActiveTab(tab);
     if (tab === 'visits') {
       const currentPendingCount = (visits || []).filter(v => (v.status || 'Pending').toLowerCase() === 'pending').length;
@@ -393,6 +408,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
     }
 
     try {
+      const resMsgs = await fetch(`${API_BASE_URL}/api/admin/messages`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const dataMsgs = await resMsgs.json();
+      if (dataMsgs.success && Array.isArray(dataMsgs.messages)) setMessages(dataMsgs.messages);
+    } catch (err) {
+      console.warn('Messages fetch notice:', err);
+    }
+
+    try {
       const resProducts = await fetch(`${API_BASE_URL}/api/products`);
       const dataProducts = await resProducts.json();
 
@@ -539,6 +564,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
       if (savedDispatches[id]) delete savedDispatches[id];
     });
     localStorage.setItem('hz_dispatches', JSON.stringify(savedDispatches));
+  };
+
+  const handleMessageStatus = async (id: number, status: string) => {
+    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, status } : m)));
+    const token = localStorage.getItem('hz_customer_token');
+    try {
+      await fetch(`${getApiBaseUrl()}/api/admin/messages/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status })
+      });
+    } catch {
+      console.warn('Could not save message status');
+    }
+  };
+
+  const handleDeleteMessage = async (id: number) => {
+    if (!window.confirm(adminLang === 'ne' ? 'यो सन्देश मेटाउने?' : 'Delete this message permanently?')) return;
+    setMessages((prev) => prev.filter((m) => m.id !== id));
+    const token = localStorage.getItem('hz_customer_token');
+    try {
+      await fetch(`${getApiBaseUrl()}/api/admin/messages/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+    } catch {
+      console.warn('Could not delete message on the server');
+    }
   };
 
   const handleDeleteVisit = async (visitId: number | string) => {
@@ -1106,6 +1159,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
   const displayedHistoryOrders = completedOrders.filter(filterMatches);
 
   const T = (en: string, ne: string) => (adminLang === 'ne' ? ne : en);
+  const newMessagesCount = messages.filter((m) => (m.status || 'NEW').toUpperCase() === 'NEW').length;
   const money = (n: number) => 'Rs. ' + Number(n || 0).toLocaleString('en-IN');
 
   const navItems: { key: typeof activeTab; label: string; count: number | null; Icon: React.ElementType }[] = [
@@ -1113,6 +1167,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
     { key: 'farmer_sales', label: T('Farmer sales', 'किसान बिक्री'), count: farmerListings.length, Icon: Tag },
     { key: 'history', label: T('Order history', 'अर्डर इतिहास'), count: completedOrders.length, Icon: History },
     { key: 'visits', label: T('Farm visits', 'फार्म भ्रमण'), count: visits.length, Icon: Calendar },
+    { key: 'messages', label: T('Messages', 'सन्देश'), count: messages.length, Icon: Mail },
     { key: 'products', label: T('Products', 'उत्पादन'), count: products.length, Icon: Edit3 },
     { key: 'settings', label: T('Media & settings', 'मिडिया र सेटिङ'), count: null, Icon: Settings }
   ];
@@ -1122,6 +1177,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
     farmer_sales: [T('Farmer marketplace', 'किसान बजार'), T('Local farmers and customers who submitted ducklings, eggs and farm produce for sale.', 'बिक्रीका लागि हाँसका चल्ला, अण्डा र उत्पादन पठाउने किसान तथा ग्राहक।')],
     history: [T('Order history', 'अर्डर इतिहास'), T('Completed orders live here.', 'सम्पन्न अर्डरहरू यहाँ हुन्छन्।')],
     visits: [T('Farm visits', 'फार्म भ्रमण'), T('Visit requests from buyers.', 'खरिदकर्ताका भ्रमण अनुरोध।')],
+    messages: [T('Messages', 'सन्देश'), T('Messages sent from the Contact page on your website.', 'वेबसाइटको सम्पर्क पृष्ठबाट आएका सन्देश।')],
     products: [T('Products', 'उत्पादन'), T('Everything that shows in your public shop.', 'तपाईंको सार्वजनिक पसलमा देखिने सबै उत्पादन।')],
     settings: [T('Media & settings', 'मिडिया र सेटिङ'), T('Homepage banner, gallery footage and channel link.', 'होमपेज ब्यानर, ग्यालरी भिडियो र च्यानल लिङ्क।')]
   };
@@ -1193,6 +1249,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
                 )}
                 {key === 'visits' && unreadVisitsCount > 0 && (
                   <span className="bg-red-600 text-white text-[10px] font-black px-1.5 rounded-full">+{unreadVisitsCount}</span>
+                )}
+                {key === 'messages' && newMessagesCount > 0 && (
+                  <span className="bg-red-600 text-white text-[10px] font-black px-1.5 rounded-full">{newMessagesCount} {T('new', 'नयाँ')}</span>
                 )}
               </button>
             );
@@ -1739,7 +1798,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
                   )}`;
 
                   const handleSendEmailConfirmation = () => {
-                    const userEmail = prompt(
+                    const userEmail = visit.email || prompt(
                       adminLang === 'ne'
                         ? `${visit.fullName} को इमेल ठेगाना लेख्नुहोस्:`
                         : `Enter email address for ${visit.fullName}:`
@@ -1779,6 +1838,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
                         </div>
                         <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-sm">
                           <span className="flex items-center gap-2 font-semibold"><Phone size={16} className="text-[#9A3F10]" strokeWidth={1.8} />{visit.phone}</span>
+                          {visit.email && <span className="flex items-center gap-2 font-semibold"><Mail size={16} className="text-[#9A3F10]" strokeWidth={1.8} />{visit.email}</span>}
                           <span className="flex items-center gap-2 font-semibold"><Calendar size={16} className="text-[#9A3F10]" strokeWidth={1.8} />{T('Visit date', 'भिजिट मिति')}: {visit.visitDate}</span>
                         </div>
                         {visit.purpose && (
@@ -1808,6 +1868,124 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToHome }) 
                     </article>
                   );
                 });
+              })()}
+            </section>
+          )}
+
+          {/* Tab: Contact page messages */}
+          {activeTab === 'messages' && (
+            <section aria-label="Messages" className="flex flex-col gap-[18px]">
+              {(() => {
+                const mq = searchQuery.toLowerCase();
+                const stOf = (m: MessageItem) => (m.status || 'NEW').toUpperCase();
+                const searched = messages.filter((m) =>
+                  (m.fullName + ' ' + m.email + ' ' + m.subject + ' ' + m.message + ' ' + m.phone).toLowerCase().includes(mq)
+                );
+                const shownMsgs = searched.filter((m) => msgFilter === 'ALL' || stOf(m) === msgFilter);
+                const filters: { key: typeof msgFilter; label: string; n: number }[] = [
+                  { key: 'ALL', label: T('All', 'सबै'), n: searched.length },
+                  { key: 'NEW', label: T('New', 'नयाँ'), n: searched.filter((m) => stOf(m) === 'NEW').length },
+                  { key: 'REPLIED', label: T('Replied', 'जवाफ दिइयो'), n: searched.filter((m) => stOf(m) === 'REPLIED').length },
+                  { key: 'CLOSED', label: T('Closed', 'बन्द'), n: searched.filter((m) => stOf(m) === 'CLOSED').length }
+                ];
+                return (
+                  <>
+                    <div role="group" aria-label="Filter messages" className="flex flex-wrap gap-2">
+                      {filters.map((f) => (
+                        <button
+                          key={f.key}
+                          type="button"
+                          aria-pressed={msgFilter === f.key}
+                          onClick={() => setMsgFilter(f.key)}
+                          className={`inline-flex items-center gap-2 min-h-[40px] box-border px-4 rounded-full text-[13px] font-bold border cursor-pointer transition ${
+                            msgFilter === f.key ? 'border-[#1D4A38] bg-[#1D4A38] text-white' : 'border-[#DDD5BF] bg-white text-[#5E6B62] hover:bg-[#F5F1E6]'
+                          }`}
+                        >
+                          {f.label}
+                          <span className={`text-xs px-1.5 rounded-full ${msgFilter === f.key ? 'bg-white/20' : 'bg-[#EFE9D8]'}`}>{f.n}</span>
+                        </button>
+                      ))}
+                    </div>
+
+                    {shownMsgs.length === 0 ? (
+                      <div className="bg-white border border-dashed border-[#CFC6AD] rounded-[18px] py-[72px] px-6 flex flex-col items-center gap-3.5 text-center">
+                        <div className="w-16 h-16 rounded-[20px] bg-[#F0EAD8] text-[#5E6B62] flex items-center justify-center">
+                          <Mail size={30} strokeWidth={1.6} />
+                        </div>
+                        <div className="hz-display font-bold text-[22px]">{T('No messages here', 'यहाँ कुनै सन्देश छैन')}</div>
+                        <div className="text-[#5E6B62] max-w-[380px]">{T('Messages from the website Contact page will show up here.', 'वेबसाइटको सम्पर्क पृष्ठबाट आएका सन्देश यहाँ देखिन्छन्।')}</div>
+                      </div>
+                    ) : (
+                      shownMsgs.map((m) => {
+                        const st = stOf(m);
+                        const digits = String(m.phone || '').replace(/[^0-9]/g, '');
+                        const waPhone = digits ? (digits.startsWith('977') ? digits : `977${digits}`) : '';
+                        const mailto = `mailto:${m.email}?subject=${encodeURIComponent('Re: ' + m.subject + ' [' + m.ref + ']')}&body=${encodeURIComponent(`Hello ${m.fullName},\n\n\n\n---\nYour message:\n${m.message}`)}`;
+                        return (
+                          <article key={m.id} className={`bg-white border rounded-[18px] p-[22px] flex flex-col gap-3.5 ${st === 'NEW' ? 'border-[#EBCB78]' : 'border-[#E4DDCB]'}`}>
+                            <div className="flex flex-wrap items-center gap-2.5">
+                              <h3 className="hz-display m-0 font-bold text-xl">{m.fullName}</h3>
+                              <span className="inline-flex px-2.5 py-[3px] rounded-lg bg-[#F0EAD8] text-[13px] font-semibold">{m.subject}</span>
+                              <select
+                                value={st}
+                                onChange={(e) => handleMessageStatus(m.id, e.target.value)}
+                                aria-label="Message status"
+                                className={`h-9 px-3 rounded-full border text-xs font-bold cursor-pointer ${
+                                  st === 'NEW' ? 'bg-[#FCE9BE] text-[#7A4A00] border-[#EBCB78]' : st === 'REPLIED' ? 'bg-[#D9EEDF] text-[#17553A] border-[#BFD9C8]' : 'bg-[#EFE9D8] text-[#5E6B62] border-[#DDD5BF]'
+                                }`}
+                              >
+                                <option value="NEW">New</option>
+                                <option value="REPLIED">Replied</option>
+                                <option value="CLOSED">Closed</option>
+                              </select>
+                              <span className="text-[13px] text-[#5E6B62] ml-auto">{m.ref} · {new Date(m.createdAt).toLocaleString()}</span>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-sm">
+                              <span className="flex items-center gap-2 font-semibold"><Mail size={16} className="text-[#9A3F10]" strokeWidth={1.8} />{m.email}</span>
+                              {m.phone && <span className="flex items-center gap-2 font-semibold"><Phone size={16} className="text-[#9A3F10]" strokeWidth={1.8} />{m.phone}</span>}
+                            </div>
+
+                            <div className="bg-[#F5F1E6] rounded-xl px-4 py-3 text-sm whitespace-pre-wrap break-words">{m.message}</div>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              <a
+                                href={mailto}
+                                onClick={() => st === 'NEW' && handleMessageStatus(m.id, 'REPLIED')}
+                                className="inline-flex items-center justify-center gap-2 h-11 px-4 rounded-xl bg-[#F4B63B] text-[#2A1B00] font-bold text-sm hover:brightness-95 transition"
+                              >
+                                <Mail size={16} strokeWidth={1.8} />{T('Reply by email', 'इमेलबाट जवाफ')}
+                              </a>
+                              {m.phone && (
+                                <>
+                                  <a href={`tel:${m.phone}`} className="inline-flex items-center justify-center gap-2 h-11 px-4 rounded-xl border border-[#DDD5BF] bg-white text-[#1A2A21] font-semibold text-sm hover:brightness-95 transition">
+                                    <Phone size={16} strokeWidth={1.8} />{T('Call', 'फोन')}
+                                  </a>
+                                  <a
+                                    href={`https://wa.me/${waPhone}?text=${encodeURIComponent(`Hello ${m.fullName}, this is Hazaridevi Duck Farm replying to your message "${m.subject}".`)}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center justify-center gap-2 h-11 px-4 rounded-xl bg-[#1E8E4A] text-white font-semibold text-sm hover:brightness-110 transition"
+                                  >
+                                    <MessageSquare size={16} strokeWidth={1.8} />WhatsApp
+                                  </a>
+                                </>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteMessage(m.id)}
+                                aria-label="Delete message"
+                                className="ml-auto w-11 h-11 rounded-xl border border-[#E7B9AE] bg-[#FFF1EE] text-[#B0301B] flex items-center justify-center cursor-pointer hover:brightness-95 transition"
+                              >
+                                <Trash2 size={18} strokeWidth={1.8} />
+                              </button>
+                            </div>
+                          </article>
+                        );
+                      })
+                    )}
+                  </>
+                );
               })()}
             </section>
           )}

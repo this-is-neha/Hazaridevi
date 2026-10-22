@@ -7,14 +7,16 @@ import axios from 'axios';
 import crypto from 'crypto';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import { createAuthRouter, getCustomerFromRequest, requireAdmin } from './routes/auth';
+import { createAuthRouter, getCustomerFromRequest, requireAdmin, requireCustomer } from './routes/auth';
 import {
   sendDispatchSlipEmail,
   sendOrderConfirmationEmail,
   sendNewOrderAdminEmail,
   verifyEmailTransport,
   sendContactAdminEmail,
-  sendContactAckEmail
+  sendContactAckEmail,
+  sendVisitAdminEmail,
+  sendVisitAckEmail
 } from './services/emailService';
 import { sendAdminSms, smsConfigured } from './services/smsService';
 import { sendAdminWhatsApp, whatsappConfigured } from './services/whatsappService';
@@ -138,6 +140,7 @@ const orderValidationSchema = z.object({
 const visitValidationSchema = z.object({
   fullName: z.string().min(2, 'Name must be at least 2 characters'),
   phone: z.string().regex(/^[0-9+]{10,14}$/, 'Valid phone number required'),
+  email: z.string().trim().email('Valid email required').optional().nullable().or(z.literal('')),
   visitDate: z.string().min(4, 'Visit date required'),
   visitorCount: z.number().min(1).default(1),
   purpose: z.string().optional().nullable()
@@ -158,6 +161,8 @@ const productValidationSchema = z.object({
 // --- 2. AUTHENTICATION MIDDLEWARE ---
 // Admin = a logged-in, verified account whose email is listed in ADMIN_EMAILS (see routes/auth.ts)
 const verifyAdminToken = requireAdmin(prisma, JWT_SECRET);
+// Placing an order, sending a message or booking a farm visit needs a verified customer login
+const verifyCustomerToken = requireCustomer(prisma, JWT_SECRET);
 
 // --- 3. PAYMENT GATEWAY INTEGRATIONS ---
 // Payment redirects always go back to our own site, never to a caller-supplied Origin
@@ -318,14 +323,14 @@ app.get('/api/orders/track', trackingLimiter, async (req: Request, res: Response
   }
 });
 
-app.post('/api/orders', publicWriteLimiter, async (req: Request, res: Response) => {
+app.post('/api/orders', verifyCustomerToken, publicWriteLimiter, async (req: Request, res: Response) => {
   try {
     const data = orderValidationSchema.parse(req.body);
     const mapUrl = data.latitude && data.longitude
       ? `https://www.google.com/maps?q=${data.latitude},${data.longitude}`
       : null;
 
-    // Logged-in customers get the order linked to their account (guests can still check out)
+    // The order is always linked to the logged-in customer's account
     const customer = await getCustomerFromRequest(req, prisma, JWT_SECRET);
     const customerEmail = data.customerEmail || customer?.email || null;
     const transactionId = data.transactionId || `WEB-${Date.now()}`;
@@ -411,7 +416,7 @@ app.post('/api/orders', publicWriteLimiter, async (req: Request, res: Response) 
 });
 
 // Farm Visit Booking
-app.post('/api/visits', publicWriteLimiter, async (req: Request, res: Response) => {
+app.post('/api/visits', verifyCustomerToken, publicWriteLimiter, async (req: Request, res: Response) => {
   try {
     const data = visitValidationSchema.parse({
       ...req.body,
@@ -422,13 +427,33 @@ app.post('/api/visits', publicWriteLimiter, async (req: Request, res: Response) 
       data: {
         fullName: data.fullName,
         phone: data.phone,
+        email: data.email ? data.email.toLowerCase() : null,
         visitDate: data.visitDate,
         visitorCount: data.visitorCount,
         purpose: data.purpose || 'General Tour'
       }
     });
 
-    return res.status(201).json({ success: true, visit: newVisit });
+    // Emails run in the background; the booking is already safely saved
+    const ref = `HDF-VIS-${String(newVisit.id).padStart(6, '0')}`;
+    const visitPayload = {
+      ref,
+      fullName: newVisit.fullName,
+      email: newVisit.email,
+      phone: newVisit.phone,
+      visitDate: newVisit.visitDate,
+      visitorCount: newVisit.visitorCount,
+      purpose: newVisit.purpose
+    };
+    const sends: Promise<unknown>[] = [sendVisitAdminEmail(visitPayload)];
+    if (newVisit.email) sends.push(sendVisitAckEmail({ ...visitPayload, email: newVisit.email }));
+    Promise.allSettled(sends).then((results) => {
+      results.forEach((r, i) => {
+        if (r.status === 'rejected') console.error(`Visit ${ref}: ${i === 0 ? 'admin' : 'customer'} email failed:`, (r.reason as Error)?.message);
+      });
+    });
+
+    return res.status(201).json({ success: true, visit: newVisit, ref });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ success: false, message: error.issues?.[0]?.message });
@@ -457,7 +482,7 @@ const contactLimiter = rateLimit({
   message: { success: false, message: 'Too many messages. Please try again in an hour, or call us directly.' }
 });
 
-app.post('/api/contact', contactLimiter, async (req: Request, res: Response) => {
+app.post('/api/contact', verifyCustomerToken, contactLimiter, async (req: Request, res: Response) => {
   const parsed = contactSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ success: false, message: parsed.error.issues[0]?.message || 'Invalid input' });
@@ -488,6 +513,53 @@ app.post('/api/contact', contactLimiter, async (req: Request, res: Response) => 
   } catch (error) {
     console.error('Contact form failed:', error);
     return res.status(500).json({ success: false, message: 'Could not send your message. Please call us instead.' });
+  }
+});
+
+// --- ADMIN: CONTACT MESSAGES ---
+app.get('/api/admin/messages', verifyAdminToken, async (_req: Request, res: Response) => {
+  try {
+    const rows = await prisma.contactMessage.findMany({ orderBy: { createdAt: 'desc' }, take: 500 });
+    const messages = rows.map((m) => ({
+      id: m.id,
+      ref: `HDF-MSG-${String(m.id).padStart(6, '0')}`,
+      fullName: m.fullName,
+      email: m.email,
+      phone: m.phone || '',
+      subject: m.subject,
+      message: m.message,
+      status: m.status,
+      createdAt: m.createdAt
+    }));
+    return res.json({ success: true, messages });
+  } catch (error) {
+    console.error('Load messages failed:', error);
+    return res.status(500).json({ success: false, message: 'Could not load messages' });
+  }
+});
+
+app.patch('/api/admin/messages/:id', verifyAdminToken, async (req: Request, res: Response) => {
+  const status = String(req.body?.status || '').toUpperCase();
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || !['NEW', 'REPLIED', 'CLOSED'].includes(status)) {
+    return res.status(400).json({ success: false, message: 'Invalid message id or status' });
+  }
+  try {
+    await prisma.contactMessage.update({ where: { id }, data: { status } });
+    return res.json({ success: true });
+  } catch {
+    return res.status(404).json({ success: false, message: 'Message not found' });
+  }
+});
+
+app.delete('/api/admin/messages/:id', verifyAdminToken, async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ success: false, message: 'Invalid message id' });
+  try {
+    await prisma.contactMessage.delete({ where: { id } });
+    return res.json({ success: true });
+  } catch {
+    return res.status(404).json({ success: false, message: 'Message not found' });
   }
 });
 

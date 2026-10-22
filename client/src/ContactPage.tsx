@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useLang } from './LanguageContext';
 import { useAuth, apiRequest } from './AuthContext';
+import { LoginRequired } from './LoginRequired';
 import { Reveal } from './Reveal';
 
 const PRIMARY_PHONE = '9807760832';
@@ -21,7 +22,7 @@ const inputClass =
 export const ContactPage: React.FC = () => {
   const { lang } = useLang();
   const t = (en: string, ne: string) => (lang === 'ne' ? ne : en);
-  const { customer } = useAuth();
+  const { customer, token } = useAuth();
 
   const subjects = [
     { value: 'Order / product enquiry', label: t('Order / product enquiry', 'अर्डर / उत्पादन सोधपुछ') },
@@ -59,6 +60,7 @@ export const ContactPage: React.FC = () => {
     }
     setBusy(true);
     const res = await apiRequest<{ ref: string }>('/api/contact', {
+      token,
       body: {
         fullName: fullName.trim(),
         email: email.trim(),
@@ -200,6 +202,8 @@ export const ContactPage: React.FC = () => {
                   </Link>
                 </div>
               </div>
+            ) : !customer ? (
+              <LoginRequired actionEn="send us a message" actionNe="सन्देश पठाउन" />
             ) : (
               <form onSubmit={submit} className="p-6 sm:p-8 space-y-5" noValidate={false}>
                 {error && (

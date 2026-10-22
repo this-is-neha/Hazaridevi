@@ -281,6 +281,62 @@ export const sendContactAckEmail = (c: ContactEmailPayload) =>
     )
   });
 
+/* ======================= FARM VISIT BOOKING ======================= */
+
+export interface VisitEmailPayload {
+  ref: string;
+  fullName: string;
+  email?: string | null;
+  phone: string;
+  visitDate: string;
+  visitorCount: number;
+  purpose?: string | null;
+}
+
+/** To the farm: new visit request, Reply goes straight to the visitor when they gave an email */
+export const sendVisitAdminEmail = (v: VisitEmailPayload) =>
+  send({
+    to: ADMIN_NOTIFY_EMAIL,
+    ...(v.email ? { replyTo: v.email } : {}),
+    subject: `🗓️ नयाँ फार्म भिजिट अनुरोध [${v.ref}]: ${v.fullName} - ${v.visitDate}`,
+    html: layout(
+      'नयाँ फार्म भिजिट अनुरोध',
+      `<table style="width:100%;border-collapse:collapse;font-size:13px;">
+         ${row('नाम / Name', escapeHtml(v.fullName))}
+         ${row('फोन / Phone', `<a href="tel:${escapeHtml(v.phone)}" style="color:#047857;">${escapeHtml(v.phone)}</a>`)}
+         ${row('इमेल / Email', v.email ? `<a href="mailto:${escapeHtml(v.email)}" style="color:#047857;">${escapeHtml(v.email)}</a>` : '—')}
+         ${row('भिजिट मिति / Visit date', escapeHtml(v.visitDate))}
+         ${row('मानिस संख्या / Visitors', escapeHtml(v.visitorCount))}
+         ${row('उद्देश्य / Purpose', escapeHtml(v.purpose || '—'))}
+         ${row('सन्दर्भ / Ref', escapeHtml(v.ref))}
+       </table>
+       <p style="font-size:12px;color:#71717a;">एडमिन प्यानलको "Farm visits" ट्याबमा कन्फर्म गर्नुहोस्। / Confirm it from the Farm visits tab in the admin panel.</p>`
+    )
+  });
+
+/** To the visitor: we received your request (not yet confirmed) */
+export const sendVisitAckEmail = (v: VisitEmailPayload & { email: string }) =>
+  send({
+    to: v.email,
+    replyTo: FARM_EMAIL,
+    subject: `🗓️ तपाईंको फार्म भिजिट अनुरोध प्राप्त भयो (Visit request received) [${v.ref}] - Hazaridevi Duck Farm`,
+    html: layout(
+      'फार्म भिजिट अनुरोध प्राप्त भयो',
+      `<p>नमस्ते <strong>${escapeHtml(v.fullName)}</strong> जी,</p>
+       <p>हाम्रो फार्म भ्रमण गर्न चाहनुभएकोमा धन्यवाद! तपाईंको अनुरोध हामीसम्म पुगेको छ। हाम्रो प्रतिनिधिले तपाईंको मिति कन्फर्म गरेपछि फोन वा इमेलमा जानकारी दिनेछन्।<br>
+       <span style="color:#52525b;">Thank you for asking to visit our farm! We have your request and a representative will confirm your date by phone or email.</span></p>
+       <table style="width:100%;border-collapse:collapse;font-size:13px;">
+         ${row('भिजिट मिति / Visit date', escapeHtml(v.visitDate))}
+         ${row('मानिस संख्या / Visitors', escapeHtml(v.visitorCount))}
+         ${row('उद्देश्य / Purpose', escapeHtml(v.purpose || '—'))}
+         ${row('सन्दर्भ / Ref', escapeHtml(v.ref))}
+       </table>
+       <p style="font-size:13px;margin-top:14px;"><strong>ठेगाना / Location:</strong> Lahan, Siraha, Madhesh Province, Nepal<br>
+       जरुरी भए फोन गर्नुहोस्: <strong>+977 ${PRIMARY_PHONE}</strong> / <strong>+977 ${SECONDARY_PHONE}</strong><br>
+       <span style="color:#52525b;">Please note: your slot is only final once we confirm it.</span></p>`
+    )
+  });
+
 /* ======================= DISPATCH SLIP ======================= */
 
 export interface DispatchEmailPayload {
